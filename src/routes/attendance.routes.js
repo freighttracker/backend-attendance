@@ -10,6 +10,7 @@ router.get('/today', authenticate, attendanceController.getTodayAttendance);
 router.get('/history', authenticate, attendanceController.getAttendanceHistory);
 router.get('/working-hours', authenticate, attendanceController.getWorkingHours);
 router.post('/correction', authenticate, attendanceController.requestCorrection);
+router.get('/my-corrections', authenticate, attendanceController.getMyCorrectionRequests);
 
 // Admin routes
 router.get('/all', authenticate, authorize('admin'), attendanceController.getAllAttendance);

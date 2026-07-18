@@ -6,6 +6,7 @@ const EmployeeRule = require('../models/EmployeeRule');
 const WeekendConfig = require('../models/WeekendConfig');
 const Holiday = require('../models/Holiday');
 const AttendanceCorrectionRequest = require('../models/AttendanceCorrectionRequest');
+const Notification = require('../models/Notification');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 
@@ -272,39 +273,118 @@ exports.getTodayAttendance = async (req, res) => {
     }
 };
 
-// @desc    Request attendance correction
+// @desc    Request attendance correction (e.g. forgot to check-in/check-out on a given day)
 // @route   POST /api/attendance/correction
 // @access  Private
 exports.requestCorrection = async (req, res) => {
     try {
-        const { attendanceRecordId, requestedCheckIn, requestedCheckOut, reason } = req.body;
+        const { attendanceRecordId, date, requestedCheckIn, requestedCheckOut, reason } = req.body;
         const userId = req.user.id;
 
-        const attendance = await AttendanceRecord.findOne({
-            _id: attendanceRecordId,
-            user: userId
-        });
-
-        if (!attendance) {
-            return errorResponse(res, 'Attendance record not found', 404);
+        if (!reason) {
+            return errorResponse(res, 'Reason is required', 400);
         }
 
-        if (attendance.isLocked) {
+        if (!requestedCheckIn && !requestedCheckOut) {
+            return errorResponse(res, 'Provide a requested check-in and/or check-out time', 400);
+        }
+
+        let attendance = null;
+        let recordDate;
+
+        if (attendanceRecordId) {
+            // Correcting an existing record (e.g. wrong check-in time)
+            attendance = await AttendanceRecord.findOne({ _id: attendanceRecordId, user: userId });
+            if (!attendance) {
+                return errorResponse(res, 'Attendance record not found', 404);
+            }
+            recordDate = attendance.date;
+        } else {
+            // No record exists yet (employee forgot to check-in/check-out entirely) - identify by date
+            if (!date) {
+                return errorResponse(res, 'Date is required', 400);
+            }
+            recordDate = moment(date).startOf('day').toDate();
+
+            if (moment(recordDate).isAfter(moment().startOf('day'))) {
+                return errorResponse(res, 'Cannot request correction for a future date', 400);
+            }
+
+            attendance = await AttendanceRecord.findOne({ user: userId, date: recordDate });
+        }
+
+        if (attendance && attendance.isLocked) {
             return errorResponse(res, 'Attendance is locked and cannot be corrected', 400);
+        }
+
+        const existingPending = await AttendanceCorrectionRequest.findOne({
+            user: userId,
+            date: recordDate,
+            status: 'pending'
+        });
+
+        if (existingPending) {
+            return errorResponse(res, 'A pending correction request already exists for this date', 400);
         }
 
         const correctionRequest = await AttendanceCorrectionRequest.create({
             user: userId,
-            attendanceRecord: attendanceRecordId,
+            attendanceRecord: attendance ? attendance._id : undefined,
+            date: recordDate,
             requestedCheckIn: requestedCheckIn ? new Date(requestedCheckIn) : null,
             requestedCheckOut: requestedCheckOut ? new Date(requestedCheckOut) : null,
             reason
         });
 
+        // Notify admins so they can review the request
+        const admins = await User.find({ role: 'admin', isActive: true }).select('_id');
+        if (admins.length > 0) {
+            const employee = await User.findById(userId).select('firstName lastName');
+            await Notification.insertMany(admins.map((admin) => ({
+                user: admin._id,
+                title: 'New Attendance Correction Request',
+                message: `${employee.firstName} ${employee.lastName} requested an attendance correction for ${moment(recordDate).format('DD MMM YYYY')}`,
+                type: 'info',
+                actionUrl: '/attendance/corrections'
+            })));
+        }
+
         logger.info(`Correction request created by user ${userId}`);
         return successResponse(res, correctionRequest, 'Correction request submitted', 201);
     } catch (error) {
         logger.error('Correction request error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    Get my correction requests
+// @route   GET /api/attendance/my-corrections
+// @access  Private
+exports.getMyCorrectionRequests = async (req, res) => {
+    try {
+        const { status, page = 1, limit = 20 } = req.query;
+        const userId = req.user.id;
+
+        const query = { user: userId };
+        if (status) query.status = status;
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const total = await AttendanceCorrectionRequest.countDocuments(query);
+
+        const requests = await AttendanceCorrectionRequest.find(query)
+            .populate('approvedBy', 'firstName lastName')
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit));
+
+        return paginatedResponse(res, requests, {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total,
+            totalPages: Math.ceil(total / parseInt(limit))
+        });
+    } catch (error) {
+        logger.error('Get my correction requests error:', error);
         return errorResponse(res, error.message, 500);
     }
 };
@@ -351,6 +431,10 @@ exports.handleCorrectionRequest = async (req, res) => {
             return errorResponse(res, 'Correction request not found', 404);
         }
 
+        if (correctionRequest.status !== 'pending') {
+            return errorResponse(res, 'Correction request has already been processed', 400);
+        }
+
         correctionRequest.status = status;
         correctionRequest.approvedBy = req.user.id;
         correctionRequest.approvedAt = new Date();
@@ -360,17 +444,65 @@ exports.handleCorrectionRequest = async (req, res) => {
 
         await correctionRequest.save();
 
-        // If approved, update attendance record
+        // If approved, update (or create) the underlying attendance record
         if (status === 'approved') {
-            const attendance = await AttendanceRecord.findById(correctionRequest.attendanceRecord);
+            let attendance = correctionRequest.attendanceRecord
+                ? await AttendanceRecord.findById(correctionRequest.attendanceRecord)
+                : await AttendanceRecord.findOne({ user: correctionRequest.user, date: correctionRequest.date });
+
+            if (!attendance) {
+                attendance = new AttendanceRecord({
+                    user: correctionRequest.user,
+                    date: correctionRequest.date,
+                    status: 'present'
+                });
+            }
+
             if (correctionRequest.requestedCheckIn) {
                 attendance.checkIn.time = correctionRequest.requestedCheckIn;
             }
             if (correctionRequest.requestedCheckOut) {
                 attendance.checkOut.time = correctionRequest.requestedCheckOut;
             }
+
+            // Recalculate working hours/status once both check-in and check-out are known
+            if (attendance.checkIn.time && attendance.checkOut.time) {
+                const rule = await getUserRule(correctionRequest.user);
+                const workingHours = moment(attendance.checkOut.time).diff(moment(attendance.checkIn.time), 'hours', true);
+
+                attendance.workingHours = parseFloat(Math.max(workingHours, 0).toFixed(2));
+                attendance.overtimeHours = rule && workingHours > rule.overtimeThreshold
+                    ? parseFloat((workingHours - rule.overtimeThreshold).toFixed(2))
+                    : 0;
+                attendance.isOvertime = attendance.overtimeHours > 0;
+                attendance.status = rule && workingHours >= rule.halfDayHours && workingHours < rule.fullDayHours
+                    ? 'half_day'
+                    : 'present';
+            } else if (attendance.checkIn.time) {
+                attendance.status = 'present';
+            }
+
+            attendance.approvedBy = req.user.id;
+            attendance.approvedAt = new Date();
+
             await attendance.save();
+
+            if (!correctionRequest.attendanceRecord) {
+                correctionRequest.attendanceRecord = attendance._id;
+                await correctionRequest.save();
+            }
         }
+
+        // Notify the employee of the outcome
+        await Notification.create({
+            user: correctionRequest.user,
+            title: `Attendance Correction ${status === 'approved' ? 'Approved' : 'Rejected'}`,
+            message: status === 'approved'
+                ? `Your attendance correction request for ${moment(correctionRequest.date).format('DD MMM YYYY')} has been approved.`
+                : `Your attendance correction request for ${moment(correctionRequest.date).format('DD MMM YYYY')} was rejected.${rejectionReason ? ` Reason: ${rejectionReason}` : ''}`,
+            type: status === 'approved' ? 'success' : 'error',
+            actionUrl: '/attendance/my-corrections'
+        });
 
         logger.info(`Correction request ${status} by admin ${req.user.id}`);
         return successResponse(res, correctionRequest, `Correction request ${status}`);

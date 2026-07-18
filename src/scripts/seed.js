@@ -480,6 +480,7 @@ const seedData = async () => {
         await AttendanceCorrectionRequest.create({
             user: jane._id,
             attendanceRecord: janeLateRecord._id,
+            date: janeLateRecord.date,
             requestedCheckIn: moment(janeLateRecord.date).hour(9).minute(5).toDate(),
             reason: 'Biometric device malfunction, actual check-in time was earlier',
             status: 'pending'
@@ -493,6 +494,7 @@ const seedData = async () => {
         await AttendanceCorrectionRequest.create({
             user: wilson._id,
             attendanceRecord: wilsonHalfDayRecord._id,
+            date: wilsonHalfDayRecord.date,
             requestedCheckOut: moment(wilsonHalfDayRecord.date).hour(18).minute(0).toDate(),
             reason: 'Stayed back for client call, checkout was not recorded',
             status: 'pending'

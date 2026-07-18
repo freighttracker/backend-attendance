@@ -8,7 +8,10 @@ const correctionRequestSchema = new mongoose.Schema({
     },
     attendanceRecord: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'AttendanceRecord',
+        ref: 'AttendanceRecord'
+    },
+    date: {
+        type: Date,
         required: true
     },
     requestedCheckIn: Date,
@@ -34,5 +37,6 @@ const correctionRequestSchema = new mongoose.Schema({
 
 correctionRequestSchema.index({ user: 1 });
 correctionRequestSchema.index({ status: 1 });
+correctionRequestSchema.index({ date: 1 });
 
 module.exports = mongoose.model('AttendanceCorrectionRequest', correctionRequestSchema);

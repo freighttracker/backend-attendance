@@ -1,0 +1,125 @@
+[
+  {
+    "_id": { "$oid": "64f1a2b3c4d5e6f7a8b9c101" },
+    "employeeCode": "EMP101",
+    "email": "john.doe@company.com",
+    "password": "$2a$12$x/74pyHHQ5KASc8icz5E2OsCO2AQRKwiYhV6nT5b89VwbeRbYTOSW",
+    "firstName": "John",
+    "lastName": "Doe",
+    "avatarUrl": null,
+    "role": "employee",
+    "department": "Engineering",
+    "designation": "Software Engineer",
+    "joiningDate": { "$date": "2026-01-05T00:00:00.000Z" },
+    "dateOfBirth": { "$date": "1996-04-12T00:00:00.000Z" },
+    "gender": "male",
+    "address": {
+      "street": "12 MG Road",
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "zipCode": "560001",
+      "country": "India"
+    },
+    "emergencyContact": {
+      "name": "Richard Doe",
+      "phone": "9876500011",
+      "relation": "Father"
+    },
+    "baseSalary": 45000,
+    "bankDetails": {
+      "bankName": "HDFC Bank",
+      "accountNumber": "50100234567890",
+      "ifscCode": "HDFC0001234",
+      "branch": "MG Road"
+    },
+    "panNumber": "ABCDE1234F",
+    "isActive": true,
+    "isVerified": true,
+    "loginAttempts": 0,
+    "createdAt": { "$date": "2026-01-05T09:00:00.000Z" },
+    "updatedAt": { "$date": "2026-01-05T09:00:00.000Z" },
+    "__v": 0
+  },
+  {
+    "_id": { "$oid": "64f1a2b3c4d5e6f7a8b9c102" },
+    "employeeCode": "EMP102",
+    "email": "jane.smith@company.com",
+    "password": "$2a$12$x/74pyHHQ5KASc8icz5E2OsCO2AQRKwiYhV6nT5b89VwbeRbYTOSW",
+    "firstName": "Jane",
+    "lastName": "Smith",
+    "avatarUrl": null,
+    "role": "manager",
+    "department": "Human Resources",
+    "designation": "HR Manager",
+    "joiningDate": { "$date": "2025-11-10T00:00:00.000Z" },
+    "dateOfBirth": { "$date": "1990-08-22T00:00:00.000Z" },
+    "gender": "female",
+    "address": {
+      "street": "45 Park Street",
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "zipCode": "400001",
+      "country": "India"
+    },
+    "emergencyContact": {
+      "name": "Robert Smith",
+      "phone": "9876500022",
+      "relation": "Spouse"
+    },
+    "baseSalary": 62000,
+    "bankDetails": {
+      "bankName": "ICICI Bank",
+      "accountNumber": "60200345678901",
+      "ifscCode": "ICIC0002345",
+      "branch": "Andheri"
+    },
+    "panNumber": "BCDEF2345G",
+    "isActive": true,
+    "isVerified": true,
+    "loginAttempts": 0,
+    "createdAt": { "$date": "2025-11-10T09:00:00.000Z" },
+    "updatedAt": { "$date": "2025-11-10T09:00:00.000Z" },
+    "__v": 0
+  },
+  {
+    "_id": { "$oid": "64f1a2b3c4d5e6f7a8b9c103" },
+    "employeeCode": "EMP103",
+    "email": "amit.kumar@company.com",
+    "password": "$2a$12$x/74pyHHQ5KASc8icz5E2OsCO2AQRKwiYhV6nT5b89VwbeRbYTOSW",
+    "firstName": "Amit",
+    "lastName": "Kumar",
+    "avatarUrl": null,
+    "role": "employee",
+    "department": "Sales",
+    "designation": "Sales Associate",
+    "joiningDate": { "$date": "2026-03-01T00:00:00.000Z" },
+    "dateOfBirth": { "$date": "1998-01-15T00:00:00.000Z" },
+    "gender": "male",
+    "address": {
+      "street": "9 Sector 21",
+      "city": "Gurugram",
+      "state": "Haryana",
+      "zipCode": "122001",
+      "country": "India"
+    },
+    "emergencyContact": {
+      "name": "Sunita Kumar",
+      "phone": "9876500033",
+      "relation": "Mother"
+    },
+    "baseSalary": 32000,
+    "bankDetails": {
+      "bankName": "SBI",
+      "accountNumber": "30300456789012",
+      "ifscCode": "SBIN0003456",
+      "branch": "Sector 14"
+    },
+    "panNumber": "CDEFG3456H",
+    "isActive": true,
+    "isVerified": true,
+    "loginAttempts": 0,
+    "createdAt": { "$date": "2026-03-01T09:00:00.000Z" },
+    "updatedAt": { "$date": "2026-03-01T09:00:00.000Z" },
+    "__v": 0
+  }
+]

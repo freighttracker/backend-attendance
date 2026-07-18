@@ -1,0 +1,9 @@
+userId,employeeCode,date,checkInTime,checkOutTime,location,ipAddress,device,latitude,longitude,workingHours,overtimeHours,lateMinutes,earlyLeaveMinutes,status,isLate,isEarlyLeave,isOvertime,notes
+64f1a2b3c4d5e6f7a8b9c001,EMP001,2026-07-13,2026-07-13T09:02:00,2026-07-13T18:05:00,Head Office,192.168.1.10,Web,19.0760,72.8777,9.05,0.05,0,0,present,false,false,false,
+64f1a2b3c4d5e6f7a8b9c002,EMP002,2026-07-13,2026-07-13T09:20:00,2026-07-13T18:00:00,Head Office,192.168.1.11,Mobile,19.0760,72.8777,8.67,0,20,0,present,true,false,false,Traffic delay
+64f1a2b3c4d5e6f7a8b9c003,EMP003,2026-07-13,2026-07-13T09:00:00,2026-07-13T13:30:00,Branch Office,192.168.1.12,Web,19.2183,72.9781,4.5,0,0,150,half_day,false,true,false,Left early for personal reason
+64f1a2b3c4d5e6f7a8b9c004,EMP004,2026-07-13,,,Remote,,Mobile,,,0,0,0,0,on_leave,false,false,false,Approved leave
+64f1a2b3c4d5e6f7a8b9c005,EMP005,2026-07-13,2026-07-13T08:55:00,2026-07-13T19:10:00,Head Office,192.168.1.13,Web,19.0760,72.8777,10.25,1.25,0,0,present,false,false,true,Worked on release
+64f1a2b3c4d5e6f7a8b9c001,EMP001,2026-07-14,2026-07-14T09:05:00,2026-07-14T18:02:00,Head Office,192.168.1.10,Web,19.0760,72.8777,8.95,0,5,0,present,false,false,false,
+64f1a2b3c4d5e6f7a8b9c002,EMP002,2026-07-14,,,Head Office,,,,,0,0,0,0,absent,false,false,false,"No show, uninformed"
+64f1a2b3c4d5e6f7a8b9c003,EMP003,2026-07-14,2026-07-14T09:01:00,2026-07-14T18:00:00,Branch Office,192.168.1.12,Web,19.2183,72.9781,8.98,0,1,0,present,false,false,false,

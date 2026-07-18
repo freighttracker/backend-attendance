@@ -1,0 +1,1696 @@
+{
+  "info": {
+    "name": "Attendance Management System API",
+    "description": "Full API collection for the Attendance Management System (Express + MongoDB). Covers auth, users, attendance, leaves, holidays, weekends, salary, salary structure, payroll runs, bonuses, reimbursements, loans, salary advances, reports, settings, notifications and dashboard endpoints, with all request arguments (body/query/path).\n\nSetup:\n1. Import the accompanying environment file `attendance-management-api.postman_environment.json` and select it.\n2. Run `Auth > Login` (or `Register` then `Login`) - the token is saved automatically to the `token` environment variable and used by every other request via Bearer auth.\n3. Admin-only endpoints require logging in with a user whose `role` is `admin`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:5000", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" },
+    { "key": "userId", "value": "", "type": "string" },
+    { "key": "employeeId", "value": "", "type": "string" },
+    { "key": "leaveId", "value": "", "type": "string" },
+    { "key": "leaveTypeId", "value": "", "type": "string" },
+    { "key": "holidayId", "value": "", "type": "string" },
+    { "key": "correctionId", "value": "", "type": "string" },
+    { "key": "salarySlipId", "value": "", "type": "string" },
+    { "key": "payrollRunId", "value": "", "type": "string" },
+    { "key": "bonusId", "value": "", "type": "string" },
+    { "key": "reimbursementId", "value": "", "type": "string" },
+    { "key": "loanId", "value": "", "type": "string" },
+    { "key": "advanceId", "value": "", "type": "string" },
+    { "key": "notificationId", "value": "", "type": "string" },
+    { "key": "weekendConfigId", "value": "", "type": "string" },
+    { "key": "attendanceRuleId", "value": "", "type": "string" },
+    { "key": "settingKey", "value": "company_name", "type": "string" },
+    { "key": "featureKey", "value": "leave_management", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register (Admin only)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/auth/register", "host": ["{{base_url}}"], "path": ["api", "auth", "register"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employeeCode\": \"EMP001\",\n  \"email\": \"employee@example.com\",\n  \"password\": \"password123\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\",\n  \"phone\": \"9999999999\",\n  \"department\": \"Engineering\",\n  \"designation\": \"Software Engineer\",\n  \"joiningDate\": \"2026-01-01\",\n  \"baseSalary\": 50000,\n  \"role\": \"employee\"\n}"
+            },
+            "description": "Required: employeeCode, email, password (min 6 chars), firstName, lastName. Optional: phone, department, designation, joiningDate, baseSalary, role (default employee)."
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/auth/login", "host": ["{{base_url}}"], "path": ["api", "auth", "login"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"employee@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "description": "Required: email, password."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  if (data.token) pm.collectionVariables.set('token', data.token);",
+                  "  if (data.refreshToken) pm.collectionVariables.set('refreshToken', data.refreshToken);",
+                  "  if (data.user && data.user._id) pm.collectionVariables.set('userId', data.user._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/auth/refresh", "host": ["{{base_url}}"], "path": ["api", "auth", "refresh"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            },
+            "description": "Required: refreshToken."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json().data;",
+                  "  if (data.token) pm.collectionVariables.set('token', data.token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Current User (Me)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/auth/me", "host": ["{{base_url}}"], "path": ["api", "auth", "me"] }
+          }
+        },
+        {
+          "name": "Update Password",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/auth/password", "host": ["{{base_url}}"], "path": ["api", "auth", "password"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"password123\",\n  \"newPassword\": \"newPassword123\"\n}"
+            },
+            "description": "Required: currentPassword, newPassword (min 6 chars)."
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/api/auth/logout", "host": ["{{base_url}}"], "path": ["api", "auth", "logout"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get All Users (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/users?page=1&limit=10&search=&department=&role=&isActive=",
+              "host": ["{{base_url}}"], "path": ["api", "users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "search", "value": "", "description": "matches firstName/lastName/email/employeeCode" },
+                { "key": "department", "value": "" },
+                { "key": "role", "value": "", "description": "employee | admin" },
+                { "key": "isActive", "value": "", "description": "true | false" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Employee (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/users", "host": ["{{base_url}}"], "path": ["api", "users"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employeeCode\": \"EMP002\",\n  \"email\": \"new.employee@example.com\",\n  \"password\": \"password123\",\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"phone\": \"9999999998\",\n  \"department\": \"HR\",\n  \"designation\": \"HR Executive\",\n  \"joiningDate\": \"2026-01-01\",\n  \"baseSalary\": 40000,\n  \"role\": \"employee\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Bulk Upload Employees (Admin, Excel)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/api/users/bulk-upload", "host": ["{{base_url}}"], "path": ["api", "users", "bulk-upload"] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "", "description": "Excel file (.xlsx) with columns: EmployeeCode, Email, Password, FirstName, LastName, Phone, Department, Designation, JoiningDate, BaseSalary" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Departments List",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/users/departments/list", "host": ["{{base_url}}"], "path": ["api", "users", "departments", "list"] }
+          }
+        },
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/users/profile/me", "host": ["{{base_url}}"], "path": ["api", "users", "profile", "me"] }
+          }
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/users/profile/me", "host": ["{{base_url}}"], "path": ["api", "users", "profile", "me"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"9999999997\",\n  \"address\": \"123 Main St\",\n  \"emergencyContact\": {\n    \"name\": \"Contact Name\",\n    \"phone\": \"9999999996\",\n    \"relation\": \"Spouse\"\n  },\n  \"avatarUrl\": \"\"\n}"
+            },
+            "description": "Only these fields are allowed: phone, address, emergencyContact, avatarUrl."
+          }
+        },
+        {
+          "name": "Upload Avatar",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/api/users/avatar", "host": ["{{base_url}}"], "path": ["api", "users", "avatar"] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "avatar", "type": "file", "src": "", "description": "Image file" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Single User",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/users/:id", "host": ["{{base_url}}"], "path": ["api", "users", ":id"],
+              "variable": [{ "key": "id", "value": "{{employeeId}}" }] }
+          }
+        },
+        {
+          "name": "Update Employee (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/users/:id", "host": ["{{base_url}}"], "path": ["api", "users", ":id"],
+              "variable": [{ "key": "id", "value": "{{employeeId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Smith\",\n  \"department\": \"HR\",\n  \"designation\": \"HR Manager\",\n  \"baseSalary\": 45000,\n  \"isActive\": true\n}"
+            },
+            "description": "Any user field except password/refreshToken."
+          }
+        },
+        {
+          "name": "Delete Employee (Admin, soft delete)",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/api/users/:id", "host": ["{{base_url}}"], "path": ["api", "users", ":id"],
+              "variable": [{ "key": "id", "value": "{{employeeId}}" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Attendance",
+      "item": [
+        {
+          "name": "Check In",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/attendance/check-in", "host": ["{{base_url}}"], "path": ["api", "attendance", "check-in"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"location\": \"Office\",\n  \"latitude\": 12.9716,\n  \"longitude\": 77.5946,\n  \"device\": \"web\",\n  \"photoUrl\": \"\"\n}"
+            },
+            "description": "All fields optional: location, latitude, longitude, device, photoUrl."
+          }
+        },
+        {
+          "name": "Check Out",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/attendance/check-out", "host": ["{{base_url}}"], "path": ["api", "attendance", "check-out"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"location\": \"Office\",\n  \"latitude\": 12.9716,\n  \"longitude\": 77.5946,\n  \"device\": \"web\",\n  \"photoUrl\": \"\"\n}"
+            },
+            "description": "All fields optional: location, latitude, longitude, device, photoUrl."
+          }
+        },
+        {
+          "name": "Get Today's Attendance",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/attendance/today", "host": ["{{base_url}}"], "path": ["api", "attendance", "today"] }
+          }
+        },
+        {
+          "name": "Get Attendance History",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/attendance/history?page=1&limit=30&startDate=2026-07-01&endDate=2026-07-31",
+              "host": ["{{base_url}}"], "path": ["api", "attendance", "history"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "30" },
+                { "key": "startDate", "value": "2026-07-01" },
+                { "key": "endDate", "value": "2026-07-31" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Working Hours Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/attendance/working-hours?month=7&year=2026",
+              "host": ["{{base_url}}"], "path": ["api", "attendance", "working-hours"],
+              "query": [
+                { "key": "month", "value": "7" },
+                { "key": "year", "value": "2026" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Request Attendance Correction",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/attendance/correction", "host": ["{{base_url}}"], "path": ["api", "attendance", "correction"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attendanceRecordId\": \"{{attendanceRecordId}}\",\n  \"requestedCheckIn\": \"2026-07-13T09:00:00.000Z\",\n  \"requestedCheckOut\": \"2026-07-13T18:00:00.000Z\",\n  \"reason\": \"Forgot to check in on time\"\n}"
+            },
+            "description": "Required: attendanceRecordId, reason. Optional: requestedCheckIn, requestedCheckOut (ISO date strings)."
+          }
+        },
+        {
+          "name": "Get All Attendance (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/attendance/all?page=1&limit=50&userId=&startDate=&endDate=&status=",
+              "host": ["{{base_url}}"], "path": ["api", "attendance", "all"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" },
+                { "key": "userId", "value": "" },
+                { "key": "startDate", "value": "" },
+                { "key": "endDate", "value": "" },
+                { "key": "status", "value": "", "description": "present | absent | half_day | on_leave | wfh" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Correction Requests (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/attendance/corrections?status=pending&page=1&limit=20",
+              "host": ["{{base_url}}"], "path": ["api", "attendance", "corrections"],
+              "query": [
+                { "key": "status", "value": "pending", "description": "pending | approved | rejected" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Approve/Reject Correction Request (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/attendance/corrections/:id", "host": ["{{base_url}}"], "path": ["api", "attendance", "corrections", ":id"],
+              "variable": [{ "key": "id", "value": "{{correctionId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"approved\",\n  \"rejectionReason\": \"\"\n}"
+            },
+            "description": "Required: status (approved | rejected). rejectionReason required if rejected."
+          }
+        },
+        {
+          "name": "Lock Attendance (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/attendance/lock", "host": ["{{base_url}}"], "path": ["api", "attendance", "lock"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2026-07-01\",\n  \"endDate\": \"2026-07-31\",\n  \"userIds\": []\n}"
+            },
+            "description": "Required: startDate, endDate. Optional: userIds (array, locks all users if omitted/empty)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Leaves",
+      "item": [
+        {
+          "name": "Apply Leave",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/leaves/apply", "host": ["{{base_url}}"], "path": ["api", "leaves", "apply"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leaveTypeId\": \"{{leaveTypeId}}\",\n  \"startDate\": \"2026-08-01\",\n  \"endDate\": \"2026-08-02\",\n  \"reason\": \"Personal work\",\n  \"attachmentUrl\": \"\"\n}"
+            },
+            "description": "Required: leaveTypeId, startDate, endDate, reason. Optional: attachmentUrl."
+          }
+        },
+        {
+          "name": "Get My Leaves",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/leaves/my-leaves?page=1&limit=10&status=",
+              "host": ["{{base_url}}"], "path": ["api", "leaves", "my-leaves"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "status", "value": "", "description": "pending | approved | rejected | cancelled" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Leave Balance",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/leaves/balance?year=2026",
+              "host": ["{{base_url}}"], "path": ["api", "leaves", "balance"],
+              "query": [{ "key": "year", "value": "2026" }]
+            }
+          }
+        },
+        {
+          "name": "Cancel Leave",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/leaves/:id/cancel", "host": ["{{base_url}}"], "path": ["api", "leaves", ":id", "cancel"],
+              "variable": [{ "key": "id", "value": "{{leaveId}}" }] }
+          }
+        },
+        {
+          "name": "Get All Leaves (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/leaves/all?page=1&limit=20&status=&userId=&startDate=&endDate=",
+              "host": ["{{base_url}}"], "path": ["api", "leaves", "all"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "status", "value": "" },
+                { "key": "userId", "value": "" },
+                { "key": "startDate", "value": "" },
+                { "key": "endDate", "value": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Approve/Reject Leave (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/leaves/:id/status", "host": ["{{base_url}}"], "path": ["api", "leaves", ":id", "status"],
+              "variable": [{ "key": "id", "value": "{{leaveId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"approved\",\n  \"rejectionReason\": \"\"\n}"
+            },
+            "description": "Required: status (approved | rejected). rejectionReason required if rejected."
+          }
+        },
+        {
+          "name": "Get Leave Types",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/leaves/types", "host": ["{{base_url}}"], "path": ["api", "leaves", "types"] }
+          }
+        },
+        {
+          "name": "Create Leave Type (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/leaves/types", "host": ["{{base_url}}"], "path": ["api", "leaves", "types"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sick Leave\",\n  \"code\": \"SL\",\n  \"defaultDaysPerYear\": 12,\n  \"isPaid\": true,\n  \"maxDaysAtOnce\": 5,\n  \"minDaysBeforeApply\": 0,\n  \"colorCode\": \"#FF5733\",\n  \"isActive\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Leave Type (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/leaves/types/:id", "host": ["{{base_url}}"], "path": ["api", "leaves", "types", ":id"],
+              "variable": [{ "key": "id", "value": "{{leaveTypeId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sick Leave\",\n  \"defaultDaysPerYear\": 15,\n  \"isPaid\": true,\n  \"maxDaysAtOnce\": 5,\n  \"isActive\": true\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Holidays",
+      "item": [
+        {
+          "name": "Get Holidays",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/holidays?year=2026&type=&isActive=",
+              "host": ["{{base_url}}"], "path": ["api", "holidays"],
+              "query": [
+                { "key": "year", "value": "2026" },
+                { "key": "type", "value": "", "description": "national | regional | optional (per schema)" },
+                { "key": "isActive", "value": "", "description": "true | false" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Holiday By ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/holidays/:id", "host": ["{{base_url}}"], "path": ["api", "holidays", ":id"],
+              "variable": [{ "key": "id", "value": "{{holidayId}}" }] }
+          }
+        },
+        {
+          "name": "Create Holiday (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/holidays", "host": ["{{base_url}}"], "path": ["api", "holidays"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Independence Day\",\n  \"date\": \"2026-08-15\",\n  \"type\": \"national\",\n  \"isActive\": true,\n  \"description\": \"\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Bulk Create Holidays (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/holidays/bulk", "host": ["{{base_url}}"], "path": ["api", "holidays", "bulk"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"holidays\": [\n    { \"name\": \"Independence Day\", \"date\": \"2026-08-15\", \"type\": \"national\", \"isActive\": true },\n    { \"name\": \"Gandhi Jayanti\", \"date\": \"2026-10-02\", \"type\": \"national\", \"isActive\": true }\n  ]\n}"
+            },
+            "description": "Required: holidays (array of holiday objects)."
+          }
+        },
+        {
+          "name": "Update Holiday (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/holidays/:id", "host": ["{{base_url}}"], "path": ["api", "holidays", ":id"],
+              "variable": [{ "key": "id", "value": "{{holidayId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Independence Day\",\n  \"date\": \"2026-08-15\",\n  \"isActive\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Holiday (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/api/holidays/:id", "host": ["{{base_url}}"], "path": ["api", "holidays", ":id"],
+              "variable": [{ "key": "id", "value": "{{holidayId}}" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Weekends",
+      "item": [
+        {
+          "name": "Get Weekend Configs",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/weekends", "host": ["{{base_url}}"], "path": ["api", "weekends"] }
+          }
+        },
+        {
+          "name": "Update Weekend Config (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/weekends/:id", "host": ["{{base_url}}"], "path": ["api", "weekends", ":id"],
+              "variable": [{ "key": "id", "value": "{{weekendConfigId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dayOfWeek\": \"saturday\",\n  \"isWeekend\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Bulk Update Weekend Configs (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/weekends/bulk", "host": ["{{base_url}}"], "path": ["api", "weekends", "bulk"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"configs\": [\n    { \"dayOfWeek\": \"saturday\", \"isWeekend\": true },\n    { \"dayOfWeek\": \"sunday\", \"isWeekend\": true }\n  ]\n}"
+            },
+            "description": "Required: configs (array of { dayOfWeek, isWeekend })."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Salary",
+      "item": [
+        {
+          "name": "Get My Salary Slips",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/salary/my-slips?page=1&limit=10&year=2026",
+              "host": ["{{base_url}}"], "path": ["api", "salary", "my-slips"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "year", "value": "2026" }
+              ]
+            },
+            "description": "Employees only ever see finalized slips (status approved | published | paid)."
+          }
+        },
+        {
+          "name": "Get All Salary Slips (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/salary/all?page=1&limit=20&userId=&month=&year=&status=",
+              "host": ["{{base_url}}"], "path": ["api", "salary", "all"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "userId", "value": "" },
+                { "key": "month", "value": "" },
+                { "key": "year", "value": "" },
+                { "key": "status", "value": "", "description": "draft | generated | approved | rejected | published | paid" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Salary Slip By ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/salary/:id", "host": ["{{base_url}}"], "path": ["api", "salary", ":id"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] },
+            "description": "Self (own slip) or admin (any slip)."
+          }
+        },
+        {
+          "name": "Download Salary Slip PDF",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/salary/:id/download", "host": ["{{base_url}}"], "path": ["api", "salary", ":id", "download"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] },
+            "description": "Self (own slip) or admin (any slip). Generates the PDF on demand if it doesn't exist yet."
+          }
+        },
+        {
+          "name": "Regenerate Salary Slip (Admin)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/api/salary/:id/regenerate", "host": ["{{base_url}}"], "path": ["api", "salary", ":id", "regenerate"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] },
+            "description": "Recomputes attendance/leave/bonus/deductions from scratch. Fails if the slip is locked or already published/paid."
+          }
+        },
+        {
+          "name": "Approve Salary Slip (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/salary/:id/approve", "host": ["{{base_url}}"], "path": ["api", "salary", ":id", "approve"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] },
+            "description": "Only slips with status 'generated' can be approved."
+          }
+        },
+        {
+          "name": "Reject Salary Slip (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/salary/:id/reject", "host": ["{{base_url}}"], "path": ["api", "salary", ":id", "reject"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Attendance data was incorrect for this period\"\n}"
+            },
+            "description": "Optional: reason. Fails if the slip is locked."
+          }
+        },
+        {
+          "name": "Publish Salary Slip (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/salary/:id/publish", "host": ["{{base_url}}"], "path": ["api", "salary", ":id", "publish"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] },
+            "description": "Only approved slips can be published. Publishing makes the slip visible to the employee and locks it."
+          }
+        },
+        {
+          "name": "Lock Salary Slip (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/salary/:id/lock", "host": ["{{base_url}}"], "path": ["api", "salary", ":id", "lock"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] }
+          }
+        },
+        {
+          "name": "Unlock Salary Slip (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/salary/:id/unlock", "host": ["{{base_url}}"], "path": ["api", "salary", ":id", "unlock"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] },
+            "description": "Published/paid slips cannot be unlocked."
+          }
+        },
+        {
+          "name": "Mark Salary As Paid (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/salary/:id/pay", "host": ["{{base_url}}"], "path": ["api", "salary", ":id", "pay"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethod\": \"bank_transfer\",\n  \"transactionId\": \"TXN123456\"\n}"
+            },
+            "description": "Only published slips can be marked as paid. Optional: paymentMethod, transactionId."
+          }
+        },
+        {
+          "name": "Email Salary Slip (Admin)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/api/salary/:id/email", "host": ["{{base_url}}"], "path": ["api", "salary", ":id", "email"],
+              "variable": [{ "key": "id", "value": "{{salarySlipId}}" }] },
+            "description": "Generates the PDF on demand if needed, then emails it to the employee."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Salary Structure",
+      "item": [
+        {
+          "name": "List Salary Structures (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/payroll/salary-structures?page=1&limit=20&department=",
+              "host": ["{{base_url}}"], "path": ["api", "payroll", "salary-structures"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "department", "value": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Salary Structure",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/payroll/salary-structures/:userId", "host": ["{{base_url}}"], "path": ["api", "payroll", "salary-structures", ":userId"],
+              "variable": [{ "key": "userId", "value": "{{employeeId}}" }] },
+            "description": "Self (own structure) or admin (any employee)."
+          }
+        },
+        {
+          "name": "Create/Revise Salary Structure (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/salary-structures/:userId", "host": ["{{base_url}}"], "path": ["api", "payroll", "salary-structures", ":userId"],
+              "variable": [{ "key": "userId", "value": "{{employeeId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"monthlyGrossSalary\": 60000,\n  \"annualCTC\": 720000,\n  \"effectiveFrom\": \"2026-07-01\",\n  \"earnings\": {\n    \"basicSalary\": { \"calculationType\": \"percentage\", \"value\": 40, \"baseComponent\": \"monthlyGrossSalary\", \"isEnabled\": true },\n    \"hra\": { \"calculationType\": \"percentage\", \"value\": 20, \"baseComponent\": \"monthlyGrossSalary\", \"isEnabled\": true },\n    \"specialAllowance\": { \"calculationType\": \"fixed\", \"value\": 5000, \"isEnabled\": true }\n  },\n  \"deductions\": {\n    \"pf\": { \"calculationType\": \"percentage\", \"value\": 12, \"baseComponent\": \"basicSalary\", \"isEnabled\": true },\n    \"professionalTax\": { \"calculationType\": \"fixed\", \"value\": 200, \"isEnabled\": true }\n  },\n  \"overtime\": {\n    \"isEnabled\": true,\n    \"rateType\": \"basicMultiplier\",\n    \"rateMultiplier\": 1.5\n  },\n  \"remarks\": \"Annual revision\"\n}"
+            },
+            "description": "Creating requires monthlyGrossSalary and annualCTC. Editing an existing structure auto-archives the previous version into revisionHistory. calculationType: fixed | percentage. baseComponent: monthlyGrossSalary | basicSalary."
+          }
+        },
+        {
+          "name": "Get Salary Revision History",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/payroll/salary-structures/:userId/history", "host": ["{{base_url}}"], "path": ["api", "payroll", "salary-structures", ":userId", "history"],
+              "variable": [{ "key": "userId", "value": "{{employeeId}}" }] },
+            "description": "Self (own history) or admin (any employee)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payroll (Admin)",
+      "item": [
+        {
+          "name": "Payroll Dashboard",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/payroll/dashboard?month=7&year=2026",
+              "host": ["{{base_url}}"], "path": ["api", "payroll", "dashboard"],
+              "query": [
+                { "key": "month", "value": "7" },
+                { "key": "year", "value": "2026" }
+              ]
+            },
+            "description": "Defaults to the current month/year if omitted."
+          }
+        },
+        {
+          "name": "Generate Payroll (Unified)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/generate", "host": ["{{base_url}}"], "path": ["api", "payroll", "generate"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{employeeId}}\",\n  \"month\": 7,\n  \"year\": 2026\n}"
+            },
+            "description": "Single entry point - dispatches by which fields are present: userId -> single employee, department (no userId) -> department, neither -> company-wide (optionally scoped by userIds array). Required in all cases: month (1-12), year."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json().data;",
+                  "  if (data.slip && data.slip._id) pm.collectionVariables.set('salarySlipId', data.slip._id);",
+                  "  if (data.payroll && data.payroll._id) pm.collectionVariables.set('payrollRunId', data.payroll._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generate Salary - Single Employee",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/generate/employee", "host": ["{{base_url}}"], "path": ["api", "payroll", "generate", "employee"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{employeeId}}\",\n  \"month\": 7,\n  \"year\": 2026\n}"
+            },
+            "description": "Required: userId, month (1-12), year. Creates/regenerates the slip and a Payroll run record."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json().data;",
+                  "  if (data.slip && data.slip._id) pm.collectionVariables.set('salarySlipId', data.slip._id);",
+                  "  if (data.payroll && data.payroll._id) pm.collectionVariables.set('payrollRunId', data.payroll._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generate Salary - Department",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/generate/department", "host": ["{{base_url}}"], "path": ["api", "payroll", "generate", "department"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"department\": \"Engineering\",\n  \"month\": 7,\n  \"year\": 2026\n}"
+            },
+            "description": "Required: department, month (1-12), year. Generates slips for every active non-admin employee in the department."
+          }
+        },
+        {
+          "name": "Generate Salary - Company",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/generate/company", "host": ["{{base_url}}"], "path": ["api", "payroll", "generate", "company"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"month\": 7,\n  \"year\": 2026,\n  \"userIds\": []\n}"
+            },
+            "description": "Required: month (1-12), year. Optional: userIds (array, generates for every active non-admin employee if omitted/empty)."
+          }
+        },
+        {
+          "name": "Get Payroll Runs",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/payroll/runs?page=1&limit=20&month=&year=&status=&scope=",
+              "host": ["{{base_url}}"], "path": ["api", "payroll", "runs"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "month", "value": "" },
+                { "key": "year", "value": "" },
+                { "key": "status", "value": "", "description": "draft | processing | completed | approved | rejected | published | locked" },
+                { "key": "scope", "value": "", "description": "employee | department | company" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Payroll Run By ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/payroll/runs/:id", "host": ["{{base_url}}"], "path": ["api", "payroll", "runs", ":id"],
+              "variable": [{ "key": "id", "value": "{{payrollRunId}}" }] },
+            "description": "Returns the run with its populated slips."
+          }
+        },
+        {
+          "name": "Approve Payroll Run",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/runs/:id/approve", "host": ["{{base_url}}"], "path": ["api", "payroll", "runs", ":id", "approve"],
+              "variable": [{ "key": "id", "value": "{{payrollRunId}}" }] },
+            "description": "Approves the run and cascades approval to every slip in it."
+          }
+        },
+        {
+          "name": "Reject Payroll Run",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/runs/:id/reject", "host": ["{{base_url}}"], "path": ["api", "payroll", "runs", ":id", "reject"],
+              "variable": [{ "key": "id", "value": "{{payrollRunId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Incorrect attendance totals for the period\"\n}"
+            },
+            "description": "Rejects the run and cascades rejection to every slip in it. Optional: reason."
+          }
+        },
+        {
+          "name": "Publish Payroll Run",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/runs/:id/publish", "host": ["{{base_url}}"], "path": ["api", "payroll", "runs", ":id", "publish"],
+              "variable": [{ "key": "id", "value": "{{payrollRunId}}" }] },
+            "description": "Run must be approved first. Publishing makes every slip visible to its employee and locks it."
+          }
+        },
+        {
+          "name": "Lock Payroll Run",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/runs/:id/lock", "host": ["{{base_url}}"], "path": ["api", "payroll", "runs", ":id", "lock"],
+              "variable": [{ "key": "id", "value": "{{payrollRunId}}" }] }
+          }
+        },
+        {
+          "name": "Unlock Payroll Run",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/runs/:id/unlock", "host": ["{{base_url}}"], "path": ["api", "payroll", "runs", ":id", "unlock"],
+              "variable": [{ "key": "id", "value": "{{payrollRunId}}" }] },
+            "description": "Unlocks the run and every non-published/paid slip in it."
+          }
+        },
+        {
+          "name": "Get Payroll Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/payroll/reports?month=7&year=2026&department=&status=&userId=",
+              "host": ["{{base_url}}"], "path": ["api", "payroll", "reports"],
+              "query": [
+                { "key": "month", "value": "7" },
+                { "key": "year", "value": "2026" },
+                { "key": "department", "value": "" },
+                { "key": "status", "value": "", "description": "draft | generated | approved | rejected | published | paid" },
+                { "key": "userId", "value": "" }
+              ]
+            },
+            "description": "Returns { summary, records } - summary totals plus every matching salary slip."
+          }
+        },
+        {
+          "name": "Export Payroll Report (Excel)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/payroll/reports/export?month=7&year=2026&department=&status=&userId=",
+              "host": ["{{base_url}}"], "path": ["api", "payroll", "reports", "export"],
+              "query": [
+                { "key": "month", "value": "7" },
+                { "key": "year", "value": "2026" },
+                { "key": "department", "value": "" },
+                { "key": "status", "value": "" },
+                { "key": "userId", "value": "" }
+              ]
+            },
+            "description": "Streams an .xlsx file (Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet). In Postman, use 'Send and Download' to save the file."
+          }
+        },
+        {
+          "name": "Get Payroll Settings",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/payroll/settings", "host": ["{{base_url}}"], "path": ["api", "payroll", "settings"] },
+            "description": "Returns { payrollCycleDay, defaultCurrency, autoLockEnabled, lockAfterDays, latePolicy }. latePolicy is the same policy payroll calculation reads at generation time."
+          }
+        },
+        {
+          "name": "Update Payroll Settings",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/settings", "host": ["{{base_url}}"], "path": ["api", "payroll", "settings"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payrollCycleDay\": 1,\n  \"defaultCurrency\": \"INR\",\n  \"autoLockEnabled\": true,\n  \"lockAfterDays\": 5,\n  \"latePolicy\": [\n    { \"lateCount\": 3, \"deductionDays\": 0.5 },\n    { \"lateCount\": 6, \"deductionDays\": 1 }\n  ]\n}"
+            },
+            "description": "Partial update - only send the fields you want to change."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bonuses",
+      "item": [
+        {
+          "name": "Get My Bonuses",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/payroll/bonuses/my", "host": ["{{base_url}}"], "path": ["api", "payroll", "bonuses", "my"] }
+          }
+        },
+        {
+          "name": "Get All Bonuses (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/payroll/bonuses?page=1&limit=20&userId=&month=&year=&status=",
+              "host": ["{{base_url}}"], "path": ["api", "payroll", "bonuses"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "userId", "value": "" },
+                { "key": "month", "value": "" },
+                { "key": "year", "value": "" },
+                { "key": "status", "value": "", "description": "pending | approved | rejected | paid" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Bonus (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/bonuses", "host": ["{{base_url}}"], "path": ["api", "payroll", "bonuses"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{employeeId}}\",\n  \"bonusType\": \"festival\",\n  \"amount\": 5000,\n  \"month\": 7,\n  \"year\": 2026,\n  \"description\": \"Festival bonus\"\n}"
+            },
+            "description": "Required: userId, bonusType (monthly | performance | festival | yearly), amount, month (1-12), year."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json().data;",
+                  "  if (data._id) pm.collectionVariables.set('bonusId', data._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approve Bonus (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/bonuses/:id/approve", "host": ["{{base_url}}"], "path": ["api", "payroll", "bonuses", ":id", "approve"],
+              "variable": [{ "key": "id", "value": "{{bonusId}}" }] }
+          }
+        },
+        {
+          "name": "Reject Bonus (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/bonuses/:id/reject", "host": ["{{base_url}}"], "path": ["api", "payroll", "bonuses", ":id", "reject"],
+              "variable": [{ "key": "id", "value": "{{bonusId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Budget not approved for this quarter\"\n}"
+            },
+            "description": "Optional: reason."
+          }
+        },
+        {
+          "name": "Delete Bonus (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/api/payroll/bonuses/:id", "host": ["{{base_url}}"], "path": ["api", "payroll", "bonuses", ":id"],
+              "variable": [{ "key": "id", "value": "{{bonusId}}" }] },
+            "description": "Fails if the bonus has already been applied to a salary slip."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reimbursements",
+      "item": [
+        {
+          "name": "Get My Reimbursements",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/payroll/reimbursements/my", "host": ["{{base_url}}"], "path": ["api", "payroll", "reimbursements", "my"] }
+          }
+        },
+        {
+          "name": "Submit Reimbursement",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{base_url}}/api/payroll/reimbursements", "host": ["{{base_url}}"], "path": ["api", "payroll", "reimbursements"] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "category", "value": "travel", "type": "text", "description": "travel | fuel | internet | medical | food | other" },
+                { "key": "amount", "value": "1500", "type": "text" },
+                { "key": "expenseDate", "value": "2026-07-10", "type": "text" },
+                { "key": "description", "value": "Client site visit cab fare", "type": "text" },
+                { "key": "userId", "value": "", "type": "text", "description": "Admin only: file on behalf of an employee" },
+                { "key": "file", "type": "file", "src": "", "description": "Optional bill/receipt upload" }
+              ]
+            },
+            "description": "Required: category, amount, expenseDate. Self by default; admins may pass userId to file on behalf of an employee."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json().data;",
+                  "  if (data._id) pm.collectionVariables.set('reimbursementId', data._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get All Reimbursements (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/payroll/reimbursements?page=1&limit=20&userId=&month=&year=&status=&category=",
+              "host": ["{{base_url}}"], "path": ["api", "payroll", "reimbursements"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "userId", "value": "" },
+                { "key": "month", "value": "" },
+                { "key": "year", "value": "" },
+                { "key": "status", "value": "", "description": "pending | approved | rejected | paid" },
+                { "key": "category", "value": "", "description": "travel | fuel | internet | medical | food | other" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Approve Reimbursement (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/reimbursements/:id/approve", "host": ["{{base_url}}"], "path": ["api", "payroll", "reimbursements", ":id", "approve"],
+              "variable": [{ "key": "id", "value": "{{reimbursementId}}" }] }
+          }
+        },
+        {
+          "name": "Reject Reimbursement (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/reimbursements/:id/reject", "host": ["{{base_url}}"], "path": ["api", "payroll", "reimbursements", ":id", "reject"],
+              "variable": [{ "key": "id", "value": "{{reimbursementId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Missing bill/receipt\"\n}"
+            },
+            "description": "Optional: reason."
+          }
+        },
+        {
+          "name": "Delete Reimbursement (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/api/payroll/reimbursements/:id", "host": ["{{base_url}}"], "path": ["api", "payroll", "reimbursements", ":id"],
+              "variable": [{ "key": "id", "value": "{{reimbursementId}}" }] },
+            "description": "Fails if the reimbursement has already been applied to a salary slip."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Loans",
+      "item": [
+        {
+          "name": "Get My Loans",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/payroll/loans/my", "host": ["{{base_url}}"], "path": ["api", "payroll", "loans", "my"] }
+          }
+        },
+        {
+          "name": "Request Loan",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/loans", "host": ["{{base_url}}"], "path": ["api", "payroll", "loans"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"\",\n  \"loanAmount\": 30000,\n  \"reason\": \"Medical emergency\",\n  \"emiAmount\": 5000,\n  \"tenureMonths\": 6,\n  \"startMonth\": 8,\n  \"startYear\": 2026\n}"
+            },
+            "description": "Required: loanAmount, emiAmount, tenureMonths, startMonth (1-12), startYear. Self by default (status becomes 'pending'); admins may pass userId to create on behalf of an employee (auto-approved, status 'active')."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json().data;",
+                  "  if (data._id) pm.collectionVariables.set('loanId', data._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get All Loans (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/payroll/loans?page=1&limit=20&userId=&status=",
+              "host": ["{{base_url}}"], "path": ["api", "payroll", "loans"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "userId", "value": "" },
+                { "key": "status", "value": "", "description": "pending | approved | rejected | active | closed | cancelled" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Loan By ID",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/payroll/loans/:id", "host": ["{{base_url}}"], "path": ["api", "payroll", "loans", ":id"],
+              "variable": [{ "key": "id", "value": "{{loanId}}" }] },
+            "description": "Self (own loan) or admin (any loan). Includes EMI deduction history."
+          }
+        },
+        {
+          "name": "Approve Loan (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/loans/:id/approve", "host": ["{{base_url}}"], "path": ["api", "payroll", "loans", ":id", "approve"],
+              "variable": [{ "key": "id", "value": "{{loanId}}" }] },
+            "description": "Only pending loans can be approved."
+          }
+        },
+        {
+          "name": "Reject Loan (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/loans/:id/reject", "host": ["{{base_url}}"], "path": ["api", "payroll", "loans", ":id", "reject"],
+              "variable": [{ "key": "id", "value": "{{loanId}}" }] }
+          }
+        },
+        {
+          "name": "Close Loan (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/loans/:id/close", "host": ["{{base_url}}"], "path": ["api", "payroll", "loans", ":id", "close"],
+              "variable": [{ "key": "id", "value": "{{loanId}}" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Advance Salary",
+      "item": [
+        {
+          "name": "Get My Advances",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/payroll/advances/my", "host": ["{{base_url}}"], "path": ["api", "payroll", "advances", "my"] }
+          }
+        },
+        {
+          "name": "Request Advance",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/payroll/advances", "host": ["{{base_url}}"], "path": ["api", "payroll", "advances"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"\",\n  \"amount\": 10000,\n  \"reason\": \"Family emergency\",\n  \"deductionPerMonth\": 2500,\n  \"startMonth\": 8,\n  \"startYear\": 2026\n}"
+            },
+            "description": "Required: amount, deductionPerMonth, startMonth (1-12), startYear. Self by default (status becomes 'pending'); admins may pass userId to create on behalf of an employee (auto-approved, status 'active')."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json().data;",
+                  "  if (data._id) pm.collectionVariables.set('advanceId', data._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get All Advances (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/payroll/advances?page=1&limit=20&userId=&status=",
+              "host": ["{{base_url}}"], "path": ["api", "payroll", "advances"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "userId", "value": "" },
+                { "key": "status", "value": "", "description": "pending | approved | rejected | active | closed" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Approve Advance (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/advances/:id/approve", "host": ["{{base_url}}"], "path": ["api", "payroll", "advances", ":id", "approve"],
+              "variable": [{ "key": "id", "value": "{{advanceId}}" }] },
+            "description": "Only pending advances can be approved."
+          }
+        },
+        {
+          "name": "Reject Advance (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/advances/:id/reject", "host": ["{{base_url}}"], "path": ["api", "payroll", "advances", ":id", "reject"],
+              "variable": [{ "key": "id", "value": "{{advanceId}}" }] }
+          }
+        },
+        {
+          "name": "Close Advance (Admin)",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/payroll/advances/:id/close", "host": ["{{base_url}}"], "path": ["api", "payroll", "advances", ":id", "close"],
+              "variable": [{ "key": "id", "value": "{{advanceId}}" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports (Admin)",
+      "item": [
+        {
+          "name": "Attendance Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/reports/attendance?startDate=2026-07-01&endDate=2026-07-31&department=&userId=",
+              "host": ["{{base_url}}"], "path": ["api", "reports", "attendance"],
+              "query": [
+                { "key": "startDate", "value": "2026-07-01" },
+                { "key": "endDate", "value": "2026-07-31" },
+                { "key": "department", "value": "" },
+                { "key": "userId", "value": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Leave Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/reports/leaves?year=2026&department=&leaveType=",
+              "host": ["{{base_url}}"], "path": ["api", "reports", "leaves"],
+              "query": [
+                { "key": "year", "value": "2026" },
+                { "key": "department", "value": "" },
+                { "key": "leaveType", "value": "", "description": "leave type ObjectId" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Salary Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/reports/salary?month=7&year=2026&department=",
+              "host": ["{{base_url}}"], "path": ["api", "reports", "salary"],
+              "query": [
+                { "key": "month", "value": "7" },
+                { "key": "year", "value": "2026" },
+                { "key": "department", "value": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Monthly Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/reports/monthly-summary?month=7&year=2026",
+              "host": ["{{base_url}}"], "path": ["api", "reports", "monthly-summary"],
+              "query": [
+                { "key": "month", "value": "7" },
+                { "key": "year", "value": "2026" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Late Comers Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/reports/late-comers?startDate=2026-07-01&endDate=2026-07-31&department=",
+              "host": ["{{base_url}}"], "path": ["api", "reports", "late-comers"],
+              "query": [
+                { "key": "startDate", "value": "2026-07-01" },
+                { "key": "endDate", "value": "2026-07-31" },
+                { "key": "department", "value": "" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Settings",
+      "item": [
+        {
+          "name": "Get All Settings (Admin)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/settings", "host": ["{{base_url}}"], "path": ["api", "settings"] }
+          }
+        },
+        {
+          "name": "Get Setting By Key",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/settings/:key", "host": ["{{base_url}}"], "path": ["api", "settings", ":key"],
+              "variable": [{ "key": "key", "value": "{{settingKey}}" }] }
+          }
+        },
+        {
+          "name": "Create Setting (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/settings", "host": ["{{base_url}}"], "path": ["api", "settings"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"settingKey\": \"company_name\",\n  \"settingValue\": \"My Company Pvt Ltd\",\n  \"description\": \"Company display name\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Setting (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/settings/:key", "host": ["{{base_url}}"], "path": ["api", "settings", ":key"],
+              "variable": [{ "key": "key", "value": "{{settingKey}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"settingValue\": \"My Company Pvt Ltd\"\n}"
+            },
+            "description": "Required: settingValue."
+          }
+        },
+        {
+          "name": "Get Attendance Rules (Admin)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/settings/attendance-rules", "host": ["{{base_url}}"], "path": ["api", "settings", "attendance-rules"] }
+          }
+        },
+        {
+          "name": "Create Attendance Rule (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/settings/attendance-rules", "host": ["{{base_url}}"], "path": ["api", "settings", "attendance-rules"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Standard Shift\",\n  \"checkInTime\": \"09:00\",\n  \"checkOutTime\": \"18:00\",\n  \"gracePeriodMinutes\": 15,\n  \"halfDayHours\": 4,\n  \"fullDayHours\": 8,\n  \"overtimeThreshold\": 9,\n  \"isDefault\": true,\n  \"isActive\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Attendance Rule (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/settings/attendance-rules/:id", "host": ["{{base_url}}"], "path": ["api", "settings", "attendance-rules", ":id"],
+              "variable": [{ "key": "id", "value": "{{attendanceRuleId}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"checkInTime\": \"09:30\",\n  \"gracePeriodMinutes\": 10\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Attendance Rule (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/api/settings/attendance-rules/:id", "host": ["{{base_url}}"], "path": ["api", "settings", "attendance-rules", ":id"],
+              "variable": [{ "key": "id", "value": "{{attendanceRuleId}}" }] }
+          }
+        },
+        {
+          "name": "Get Sandwich Leave Policy (Admin)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/settings/sandwich-policy", "host": ["{{base_url}}"], "path": ["api", "settings", "sandwich-policy"] }
+          }
+        },
+        {
+          "name": "Update Sandwich Leave Policy (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/settings/sandwich-policy", "host": ["{{base_url}}"], "path": ["api", "settings", "sandwich-policy"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isEnabled\": true,\n  \"minLeaveDays\": 3,\n  \"appliesToLeaveTypes\": [\"CL\", \"SL\"]\n}"
+            }
+          }
+        },
+        {
+          "name": "Toggle Feature (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/settings/features/:feature", "host": ["{{base_url}}"], "path": ["api", "settings", "features", ":feature"],
+              "variable": [{ "key": "feature", "value": "{{featureKey}}" }] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true\n}"
+            },
+            "description": "Required: enabled (boolean)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "Get My Notifications",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/notifications?page=1&limit=20&unreadOnly=false",
+              "host": ["{{base_url}}"], "path": ["api", "notifications"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "unreadOnly", "value": "false" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Unread Count",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/notifications/unread-count", "host": ["{{base_url}}"], "path": ["api", "notifications", "unread-count"] }
+          }
+        },
+        {
+          "name": "Mark All As Read",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/notifications/read-all", "host": ["{{base_url}}"], "path": ["api", "notifications", "read-all"] }
+          }
+        },
+        {
+          "name": "Mark Notification As Read",
+          "request": {
+            "method": "PUT",
+            "url": { "raw": "{{base_url}}/api/notifications/:id/read", "host": ["{{base_url}}"], "path": ["api", "notifications", ":id", "read"],
+              "variable": [{ "key": "id", "value": "{{notificationId}}" }] }
+          }
+        },
+        {
+          "name": "Delete Notification",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/api/notifications/:id", "host": ["{{base_url}}"], "path": ["api", "notifications", ":id"],
+              "variable": [{ "key": "id", "value": "{{notificationId}}" }] }
+          }
+        },
+        {
+          "name": "Create Notification (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/api/notifications", "host": ["{{base_url}}"], "path": ["api", "notifications"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": \"{{employeeId}}\",\n  \"title\": \"Leave Approved\",\n  \"message\": \"Your leave request has been approved.\",\n  \"type\": \"info\",\n  \"actionUrl\": \"\"\n}"
+            },
+            "description": "Required: userId, title, message. Optional: type (default info), actionUrl."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Admin Dashboard",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/dashboard/admin", "host": ["{{base_url}}"], "path": ["api", "dashboard", "admin"] }
+          }
+        },
+        {
+          "name": "Employee Dashboard",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/api/dashboard/employee", "host": ["{{base_url}}"], "path": ["api", "dashboard", "employee"] }
+          }
+        }
+      ]
+    }
+  ]
+}

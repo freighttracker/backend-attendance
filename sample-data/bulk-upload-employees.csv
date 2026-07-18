@@ -1,0 +1,6 @@
+Employee Code,Email,Password,First Name,Last Name,Phone Number,Department,Designation,Joining Date,Base Salary
+EMP101,john.doe@example.com,employee123,John,Doe,9876543210,Engineering,Software Engineer,2026-01-05,45000
+EMP102,jane.smith@example.com,employee123,Jane,Smith,9876543211,Human Resources,HR Executive,2026-02-10,38000
+EMP103,amit.kumar@example.com,employee123,Amit,Kumar,9876543212,Sales,Sales Associate,2026-03-01,32000
+EMP104,priya.singh@example.com,employee123,Priya,Singh,9876543213,Engineering,QA Engineer,2026-03-15,42000
+EMP105,ravi.patel@example.com,employee123,Ravi,Patel,9876543214,Finance,Accountant,2026-04-20,40000

@@ -165,6 +165,7 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         weeklyOffs: 0,
         holidays: 0,
         lateCount: 0,
+        earlyLeaveCount: 0,
         overtimeHours: 0
     };
 
@@ -190,6 +191,7 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
 
         if (record) {
             summary.lateCount += record.isLate ? 1 : 0;
+            summary.earlyLeaveCount += record.isEarlyLeave ? 1 : 0;
             summary.overtimeHours += record.overtimeHours || 0;
 
             if (record.status === 'present' || record.status === 'wfh') {
@@ -217,6 +219,22 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
 
     return summary;
 };
+
+// ---------------------------------------------------------------------------
+// Payable "salary days" for a month - present/holiday/weekly-off count in
+// full, half days count as half, unpaid leave and absence count as zero.
+// This is the same accounting calculateSalary() already applies via its
+// per-day-rate deduction math below; exposed as a named value here purely
+// for reporting/display so the attendance report never has to duplicate or
+// drift from what payroll actually pays.
+// ---------------------------------------------------------------------------
+const computeSalaryDays = (attendance) => round2(
+    (attendance.presentDays || 0) +
+    (attendance.halfDays || 0) * 0.5 +
+    (attendance.paidLeaveDays || 0) +
+    (attendance.holidays || 0) +
+    (attendance.weeklyOffs || 0)
+);
 
 // ---------------------------------------------------------------------------
 // Ad-hoc earnings: approved, not-yet-applied bonuses/reimbursements for the
@@ -456,6 +474,7 @@ module.exports = {
     getCompanyProfile,
     getEffectiveStructure,
     getMonthlyAttendanceSummary,
+    computeSalaryDays,
     calculateSalary,
     commitSlipSideEffects,
     releaseSlipSideEffects

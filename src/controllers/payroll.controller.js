@@ -1,13 +1,36 @@
 const mongoose = require('mongoose');
+const moment = require('moment-timezone');
 const XLSX = require('xlsx');
 const SalarySlip = require('../models/SalarySlip');
 const Payroll = require('../models/Payroll');
 const User = require('../models/User');
 const SystemSetting = require('../models/SystemSetting');
+const Bonus = require('../models/Bonus');
+const Reimbursement = require('../models/Reimbursement');
+const AttendanceRecord = require('../models/AttendanceRecord');
 const { calculateSalary, commitSlipSideEffects, releaseSlipSideEffects, round2 } = require('../services/payroll.service');
 const { generateSalarySlipPDF } = require('../services/pdf.service');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const PRESENT_STATUSES = ['present', 'half_day', 'wfh'];
+
+// Builds the trailing `count` months (oldest first, ending at month/year inclusive)
+// used to drive the dashboard's trend/attendance/expense charts.
+function trailingMonths(month, year, count) {
+    const months = [];
+    for (let i = count - 1; i >= 0; i -= 1) {
+        const d = new Date(year, month - 1 - i, 1);
+        months.push({ month: d.getMonth() + 1, year: d.getFullYear(), label: `${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}` });
+    }
+    return months;
+}
+
+function fullName(user) {
+    if (!user) return 'Unknown';
+    return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.employeeCode || 'Unknown';
+}
 
 const SLIP_FIELDS = [
     'employeeSnapshot', 'salaryStructureSnapshot', 'attendanceSummary', 'earnings', 'deductions',
@@ -368,43 +391,150 @@ exports.getPayrollDashboard = async (req, res) => {
         const month = parseInt(req.query.month) || (now.getMonth() + 1);
         const year = parseInt(req.query.year) || now.getFullYear();
 
-        const totalEligibleEmployees = await User.countDocuments({ isActive: true, role: { $ne: 'admin' } });
+        const employeeFilter = { role: { $ne: 'admin' } };
+        const [totalEmployees, activeEmployees] = await Promise.all([
+            User.countDocuments(employeeFilter),
+            User.countDocuments({ ...employeeFilter, isActive: true })
+        ]);
+        const inactiveEmployees = Math.max(totalEmployees - activeEmployees, 0);
 
-        const [agg] = await SalarySlip.aggregate([
+        const [slipAgg] = await SalarySlip.aggregate([
             { $match: { month, year } },
             {
                 $group: {
                     _id: null,
-                    employeesProcessed: { $sum: 1 },
-                    totalGrossSalary: { $sum: '$grossSalary' },
-                    totalDeductions: { $sum: '$totalDeductions' },
+                    salaryGenerated: { $sum: 1 },
+                    payrollAmount: { $sum: '$netSalary' },
                     totalBonus: { $sum: '$totalBonus' },
-                    totalReimbursements: { $sum: '$totalReimbursement' },
-                    totalNetSalary: { $sum: '$netSalary' },
-                    totalSalaryPaid: { $sum: { $cond: [{ $eq: ['$status', 'paid'] }, '$netSalary', 0] } },
-                    pendingPayroll: { $sum: { $cond: [{ $in: ['$status', ['draft', 'generated', 'rejected']] }, 1, 0] } }
+                    totalDeductions: { $sum: '$totalDeductions' },
+                    pendingPayroll: { $sum: { $cond: [{ $in: ['$status', ['draft', 'generated', 'rejected']] }, 1, 0] } },
+                    pendingSlipApprovals: { $sum: { $cond: [{ $eq: ['$status', 'generated'] }, 1, 0] } }
                 }
             }
         ]);
-
-        const summary = agg || {
-            employeesProcessed: 0, totalGrossSalary: 0, totalDeductions: 0, totalBonus: 0,
-            totalReimbursements: 0, totalNetSalary: 0, totalSalaryPaid: 0, pendingPayroll: 0
+        const slipSummary = slipAgg || {
+            salaryGenerated: 0, payrollAmount: 0, totalBonus: 0, totalDeductions: 0,
+            pendingPayroll: 0, pendingSlipApprovals: 0
         };
-        delete summary._id;
+
+        const [pendingBonusApprovals, pendingReimbursementApprovals] = await Promise.all([
+            Bonus.countDocuments({ status: 'pending' }),
+            Reimbursement.countDocuments({ status: 'pending' })
+        ]);
+        const pendingApprovals = slipSummary.pendingSlipApprovals + pendingBonusApprovals + pendingReimbursementApprovals;
+
+        // Today's attendance rate among active employees, used for the
+        // "<Month> Status" KPI card.
+        const startOfToday = moment().startOf('day').toDate();
+        const endOfToday = moment().endOf('day').toDate();
+        const presentToday = await AttendanceRecord.countDocuments({
+            date: { $gte: startOfToday, $lte: endOfToday },
+            status: { $in: PRESENT_STATUSES }
+        });
+        const todayStatusPct = activeEmployees > 0 ? Math.round((presentToday / activeEmployees) * 100) : 0;
+
+        // Trailing 6-month series shared by the trend / attendance-vs-payroll /
+        // salary-expense charts, so each chart can independently decide
+        // whether it actually has anything worth plotting.
+        const months = trailingMonths(month, year, 6);
+        const monthlyData = await Promise.all(months.map(async (m) => {
+            const start = moment.utc([m.year, m.month - 1, 1]).startOf('month').toDate();
+            const end = moment.utc([m.year, m.month - 1, 1]).endOf('month').toDate();
+
+            const [[slipTotals], [attendanceTotals]] = await Promise.all([
+                SalarySlip.aggregate([
+                    { $match: { month: m.month, year: m.year } },
+                    { $group: { _id: null, gross: { $sum: '$grossSalary' }, net: { $sum: '$netSalary' }, earnings: { $sum: '$totalEarnings' }, deductions: { $sum: '$totalDeductions' } } }
+                ]),
+                AttendanceRecord.aggregate([
+                    { $match: { date: { $gte: start, $lte: end } } },
+                    { $group: { _id: null, total: { $sum: 1 }, present: { $sum: { $cond: [{ $in: ['$status', PRESENT_STATUSES] }, 1, 0] } } } }
+                ])
+            ]);
+
+            const attTotal = attendanceTotals?.total || 0;
+            return {
+                label: m.label,
+                gross: round2(slipTotals?.gross || 0),
+                net: round2(slipTotals?.net || 0),
+                earnings: round2(slipTotals?.earnings || 0),
+                deductions: round2(slipTotals?.deductions || 0),
+                attendancePct: attTotal > 0 ? Math.round(((attendanceTotals.present || 0) / attTotal) * 100) : 0
+            };
+        }));
+
+        const trend = monthlyData.some((m) => m.gross || m.net)
+            ? monthlyData.map((m) => ({ label: m.label, gross: m.gross, net: m.net }))
+            : [];
+        const salaryExpense = monthlyData.some((m) => m.earnings || m.deductions)
+            ? monthlyData.map((m) => ({ label: m.label, earnings: m.earnings, deductions: m.deductions }))
+            : [];
+        const attendanceVsPayroll = monthlyData.some((m) => m.net || m.attendancePct)
+            ? monthlyData.map((m) => ({ label: m.label, payroll: m.net, attendancePct: m.attendancePct }))
+            : [];
+
+        const departmentAgg = await SalarySlip.aggregate([
+            { $match: { month, year, 'employeeSnapshot.department': { $nin: [null, ''] } } },
+            { $group: { _id: '$employeeSnapshot.department', total: { $sum: '$netSalary' } } },
+            { $sort: { total: -1 } }
+        ]);
+        const departmentDistribution = departmentAgg.map((d) => ({ department: d._id, total: round2(d.total) }));
+
+        const bonusAgg = await Bonus.aggregate([
+            { $match: { month, year, status: { $ne: 'rejected' } } },
+            { $group: { _id: '$bonusType', amount: { $sum: '$amount' } } },
+            { $sort: { amount: -1 } }
+        ]);
+        const bonusDistribution = bonusAgg.map((b) => ({ type: b._id, amount: round2(b.amount) }));
+
+        const [recentSalaries, recentReimbursements, recentPendingBonuses, recentPendingReimbursements] = await Promise.all([
+            SalarySlip.find().sort({ generatedAt: -1 }).limit(5),
+            Reimbursement.find().sort({ createdAt: -1 }).limit(5).populate('user', 'firstName lastName employeeCode'),
+            Bonus.find({ status: 'pending' }).sort({ createdAt: -1 }).limit(5).populate('user', 'firstName lastName employeeCode'),
+            Reimbursement.find({ status: 'pending' }).sort({ createdAt: -1 }).limit(5).populate('user', 'firstName lastName employeeCode')
+        ]);
+
+        const recentActivities = {
+            salaries: recentSalaries.map((s) => ({
+                id: s._id,
+                employeeName: s.employeeSnapshot?.fullName || 'Unknown',
+                date: s.generatedAt,
+                netSalary: s.netSalary
+            })),
+            reimbursements: recentReimbursements.map((r) => ({
+                id: r._id,
+                employeeName: fullName(r.user),
+                category: r.category,
+                date: r.expenseDate || r.createdAt,
+                amount: r.amount
+            })),
+            approvals: [
+                ...recentPendingBonuses.map((b) => ({ id: b._id, employeeName: fullName(b.user), type: 'Bonus approval' })),
+                ...recentPendingReimbursements.map((r) => ({ id: r._id, employeeName: fullName(r.user), type: 'Reimbursement approval' }))
+            ].slice(0, 5)
+        };
 
         return successResponse(res, {
-            month, year,
-            totalEligibleEmployees,
-            employeesProcessed: summary.employeesProcessed,
-            employeesPending: Math.max(totalEligibleEmployees - summary.employeesProcessed, 0),
-            pendingPayroll: summary.pendingPayroll,
-            totalSalaryPaid: round2(summary.totalSalaryPaid),
-            totalGrossSalary: round2(summary.totalGrossSalary),
-            totalDeductions: round2(summary.totalDeductions),
-            totalBonus: round2(summary.totalBonus),
-            totalReimbursements: round2(summary.totalReimbursements),
-            totalNetSalary: round2(summary.totalNetSalary)
+            month,
+            year,
+            summary: {
+                totalEmployees,
+                activeEmployees,
+                inactiveEmployees,
+                salaryGenerated: slipSummary.salaryGenerated,
+                pendingPayroll: slipSummary.pendingPayroll,
+                payrollAmount: round2(slipSummary.payrollAmount),
+                pendingApprovals,
+                totalBonus: round2(slipSummary.totalBonus),
+                totalDeductions: round2(slipSummary.totalDeductions),
+                todayStatusPct
+            },
+            trend,
+            departmentDistribution,
+            attendanceVsPayroll,
+            salaryExpense,
+            bonusDistribution,
+            recentActivities
         }, 'Payroll dashboard retrieved');
     } catch (error) {
         logger.error('Get payroll dashboard error:', error);

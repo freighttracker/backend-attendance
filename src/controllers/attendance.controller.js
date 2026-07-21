@@ -435,6 +435,14 @@ exports.handleCorrectionRequest = async (req, res) => {
             return errorResponse(res, 'Correction request has already been processed', 400);
         }
 
+        // Backfill date on legacy correction requests that predate the required `date` field
+        if (!correctionRequest.date && correctionRequest.attendanceRecord) {
+            const linkedRecord = await AttendanceRecord.findById(correctionRequest.attendanceRecord);
+            if (linkedRecord) {
+                correctionRequest.date = linkedRecord.date;
+            }
+        }
+
         correctionRequest.status = status;
         correctionRequest.approvedBy = req.user.id;
         correctionRequest.approvedAt = new Date();

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const attendanceController = require('../controllers/attendance.controller');
+const attendanceReportController = require('../controllers/attendanceReport.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
 
 // Employee routes
@@ -17,5 +18,10 @@ router.get('/all', authenticate, authorize('admin'), attendanceController.getAll
 router.get('/corrections', authenticate, authorize('admin'), attendanceController.getCorrectionRequests);
 router.put('/corrections/:id', authenticate, authorize('admin'), attendanceController.handleCorrectionRequest);
 router.post('/lock', authenticate, authorize('admin'), attendanceController.lockAttendance);
+
+// Monthly attendance report module
+router.get('/report/monthly', authenticate, authorize('admin'), attendanceReportController.getMonthlyReport);
+router.get('/report/employee/:id', authenticate, attendanceReportController.getEmployeeReport);
+router.get('/dashboard', authenticate, authorize('admin'), attendanceReportController.getAttendanceDashboard);
 
 module.exports = router;

@@ -120,7 +120,7 @@ const salarySlipSchema = new mongoose.Schema({
     paidAt: Date,
     paymentMethod: {
         type: String,
-        enum: ['bank_transfer', 'cash', 'cheque', null],
+        enum: ['bank_transfer', 'cash', 'cheque', 'upi', null],
         default: null
     },
     transactionId: String,

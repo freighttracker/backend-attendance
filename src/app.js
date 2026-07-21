@@ -41,7 +41,10 @@ app.use(cors({
 const limiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
     max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    message: 'Too many requests from this IP, please try again later.'
+    message: {
+        success: false,
+        message: 'Too many requests from this IP, please try again later.'
+    }
 });
 app.use('/api/', limiter);
 
@@ -87,6 +90,8 @@ app.use('/api/salary', salaryRoutes);
 app.use('/api/payroll/salary-structures', salaryStructureRoutes);
 app.use('/api/payroll/bonuses', bonusRoutes);
 app.use('/api/payroll/reimbursements', reimbursementRoutes);
+// Alias - kept since some clients call /api/reimbursements instead of the canonical payroll route.
+app.use('/api/reimbursements', reimbursementRoutes);
 app.use('/api/payroll/loans', loanRoutes);
 app.use('/api/payroll/advances', advanceSalaryRoutes);
 app.use('/api/payroll', payrollRoutes);

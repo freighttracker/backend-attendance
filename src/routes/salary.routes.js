@@ -1,10 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const salaryController = require('../controllers/salary.controller');
+const payrollController = require('../controllers/payroll.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
 
 // Employee routes
 router.get('/my-slips', authenticate, salaryController.getMySalarySlips);
+
+// Alias for POST /api/payroll/generate - kept here since some clients call
+// /api/salary/generate instead of the canonical payroll route.
+router.post('/generate', authenticate, authorize('admin'), payrollController.generatePayroll);
 
 // Admin routes
 router.get('/all', authenticate, authorize('admin'), salaryController.getAllSalarySlips);

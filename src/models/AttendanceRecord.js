@@ -32,7 +32,15 @@ const attendanceRecordSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    workingMinutes: {
+        type: Number,
+        default: 0
+    },
     overtimeHours: {
+        type: Number,
+        default: 0
+    },
+    overtimeMinutes: {
         type: Number,
         default: 0
     },
@@ -41,6 +49,10 @@ const attendanceRecordSchema = new mongoose.Schema({
         default: 0
     },
     earlyLeaveMinutes: {
+        type: Number,
+        default: 0
+    },
+    earlyCheckinMinutes: {
         type: Number,
         default: 0
     },
@@ -57,10 +69,38 @@ const attendanceRecordSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    isEarlyCheckin: {
+        type: Boolean,
+        default: false
+    },
     isOvertime: {
         type: Boolean,
         default: false
     },
+    isHalfDay: {
+        type: Boolean,
+        default: false
+    },
+    isAbsent: {
+        type: Boolean,
+        default: false
+    },
+    // True when check-in landed inside a grace window (before or after
+    // office start) rather than exactly on time - i.e. grace was what kept
+    // it from being flagged Late.
+    isGraceUsed: {
+        type: Boolean,
+        default: false
+    },
+    // Snapshot of whatever AttendanceRule was actually in effect for this
+    // record, so a later change to office timings never rewrites the history
+    // of a day that already happened (same pattern as SalarySlip's
+    // salaryStructureSnapshot).
+    officeStartTime: String,
+    officeEndTime: String,
+    graceBeforeMinutes: Number,
+    graceAfterMinutes: Number,
+    allowedEarlyCheckinMinutes: Number,
     notes: {
         type: String,
         trim: true

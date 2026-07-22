@@ -99,6 +99,40 @@ const userSchema = new mongoose.Schema({
         type: String,
         trim: true
     },
+    // Additive HRMS fields (not part of the original schema) - kept optional
+    // so existing records/flows are unaffected. reportingManager is a self
+    // reference rather than a free-text field so org-chart/report queries
+    // can populate it like any other relationship in this schema.
+    employmentType: {
+        type: String,
+        enum: ['full-time', 'part-time', 'contract', 'intern'],
+        default: 'full-time'
+    },
+    reportingManager: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    aadhaarNumber: {
+        type: String,
+        trim: true
+    },
+    pfNumber: {
+        type: String,
+        trim: true
+    },
+    esicNumber: {
+        type: String,
+        trim: true
+    },
+    branch: {
+        type: String,
+        trim: true
+    },
+    location: {
+        type: String,
+        trim: true
+    },
     isActive: {
         type: Boolean,
         default: true

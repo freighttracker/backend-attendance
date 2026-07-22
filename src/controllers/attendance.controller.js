@@ -5,10 +5,28 @@ const AttendanceRule = require('../models/AttendanceRule');
 const EmployeeRule = require('../models/EmployeeRule');
 const WeekendConfig = require('../models/WeekendConfig');
 const Holiday = require('../models/Holiday');
+const LeaveRequest = require('../models/LeaveRequest');
 const AttendanceCorrectionRequest = require('../models/AttendanceCorrectionRequest');
 const Notification = require('../models/Notification');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
+
+// Used only if no AttendanceRule document exists at all yet (e.g. a brand
+// new deployment before an admin has visited Settings) so check-in/out never
+// hard-crashes for lack of configuration.
+const FALLBACK_RULE = {
+    checkInTime: '09:00',
+    checkOutTime: '18:00',
+    gracePeriodMinutes: 15,
+    graceBeforeMinutes: 0,
+    allowedEarlyCheckinMinutes: 60,
+    earlyCheckinAction: 'mark',
+    halfDayHours: 4,
+    fullDayHours: 8,
+    absentThresholdHours: 2,
+    overtimeThreshold: 8,
+    lunchBreakMinutes: 0
+};
 
 // Get user's attendance rule
 const getUserRule = async (userId) => {
@@ -20,7 +38,8 @@ const getUserRule = async (userId) => {
 
     if (employeeRule) return employeeRule.rule;
 
-    return await AttendanceRule.findOne({ isDefault: true, isActive: true });
+    const defaultRule = await AttendanceRule.findOne({ isDefault: true, isActive: true });
+    return defaultRule || FALLBACK_RULE;
 };
 
 // Check if date is weekend
@@ -42,6 +61,62 @@ const isHoliday = async (date) => {
     return !!holiday;
 };
 
+// Check if the user has an approved leave covering this date
+const isOnApprovedLeave = async (userId, date) => {
+    const leave = await LeaveRequest.findOne({
+        user: userId,
+        status: 'approved',
+        startDate: { $lte: moment(date).endOf('day').toDate() },
+        endDate: { $gte: moment(date).startOf('day').toDate() }
+    });
+    return !!leave;
+};
+
+// Shared checkout math - used by the live checkout endpoint AND by admin
+// approval of a backfilled correction request, so the two paths can never
+// disagree on how a day's status/hours/flags are derived.
+const computeCheckoutOutcome = (rule, checkInTime, checkOutTime) => {
+    const checkInMoment = moment(checkInTime);
+    const checkOutMoment = moment(checkOutTime);
+    const officeEnd = moment(rule.checkOutTime, 'HH:mm');
+
+    const workingHours = Math.max(checkOutMoment.diff(checkInMoment, 'hours', true), 0);
+    const workingMinutes = Math.max(checkOutMoment.diff(checkInMoment, 'minutes'), 0);
+
+    const overtimeHours = workingHours > rule.overtimeThreshold ? workingHours - rule.overtimeThreshold : 0;
+
+    const isEarlyLeave = checkOutMoment.isBefore(officeEnd);
+    const earlyLeaveMinutes = isEarlyLeave ? officeEnd.diff(checkOutMoment, 'minutes') : 0;
+
+    // Absent/half-day/present ladder: below absentThresholdHours -> Absent
+    // outright (regardless of half/full day thresholds); below fullDayHours
+    // -> Half Day; otherwise a full Present day. (halfDayHours is kept on the
+    // rule for display/back-compat but absentThresholdHours now owns the
+    // lower edge of the Half Day band, closing a gap where very short days
+    // used to silently stay "present".)
+    let status;
+    if (workingHours < (rule.absentThresholdHours ?? 0)) {
+        status = 'absent';
+    } else if (workingHours < rule.fullDayHours) {
+        status = 'half_day';
+    } else {
+        status = 'present';
+    }
+
+    return {
+        workingHours: parseFloat(workingHours.toFixed(2)),
+        workingMinutes,
+        overtimeHours: parseFloat(overtimeHours.toFixed(2)),
+        overtimeMinutes: Math.round(overtimeHours * 60),
+        isOvertime: overtimeHours > 0,
+        isEarlyLeave,
+        earlyLeaveMinutes,
+        status,
+        isHalfDay: status === 'half_day',
+        isAbsent: status === 'absent'
+    };
+};
+
 // @desc    Check-in
 // @route   POST /api/attendance/check-in
 // @access  Private
@@ -59,13 +134,42 @@ exports.checkIn = async (req, res) => {
             return errorResponse(res, 'Already checked in today', 400);
         }
 
-        const rule = await getUserRule(userId);
-        const checkInTime = moment(rule.checkInTime, 'HH:mm');
-        const currentTime = moment(now);
-        const graceEnd = checkInTime.clone().add(rule.gracePeriodMinutes, 'minutes');
+        if (await isWeekend(today)) {
+            return errorResponse(res, 'Cannot check in - today is a week off', 400);
+        }
+        if (await isHoliday(today)) {
+            return errorResponse(res, 'Cannot check in - today is a holiday', 400);
+        }
+        if (await isOnApprovedLeave(userId, today)) {
+            return errorResponse(res, 'Cannot check in - you are on approved leave today', 400);
+        }
 
-        const isLate = currentTime.isAfter(graceEnd);
-        const lateMinutes = isLate ? currentTime.diff(checkInTime, 'minutes') : 0;
+        const rule = await getUserRule(userId);
+        const officeStart = moment(rule.checkInTime, 'HH:mm');
+        const currentTime = moment(now);
+
+        const earliestAllowed = officeStart.clone().subtract(rule.allowedEarlyCheckinMinutes || 0, 'minutes');
+        const graceBeforeStart = officeStart.clone().subtract(rule.graceBeforeMinutes || 0, 'minutes');
+        const graceAfterEnd = officeStart.clone().add(rule.gracePeriodMinutes || 0, 'minutes');
+
+        let isEarlyCheckin = false;
+        let earlyCheckinMinutes = 0;
+        if (currentTime.isBefore(earliestAllowed)) {
+            if (rule.earlyCheckinAction === 'reject') {
+                return errorResponse(res, `Check-in is not allowed before ${earliestAllowed.format('hh:mm A')}`, 400);
+            }
+            isEarlyCheckin = true;
+            earlyCheckinMinutes = officeStart.diff(currentTime, 'minutes');
+        } else if (currentTime.isBefore(graceBeforeStart)) {
+            isEarlyCheckin = true;
+            earlyCheckinMinutes = officeStart.diff(currentTime, 'minutes');
+        }
+
+        const isLate = currentTime.isAfter(graceAfterEnd);
+        const lateMinutes = isLate ? currentTime.diff(officeStart, 'minutes') : 0;
+        // Grace "used" = arrived after office start but still within the
+        // after-grace window, i.e. grace is the only reason this isn't Late.
+        const isGraceUsed = !isLate && currentTime.isAfter(officeStart);
 
         if (!attendance) {
             attendance = new AttendanceRecord({
@@ -84,8 +188,17 @@ exports.checkIn = async (req, res) => {
             latitude,
             longitude
         };
+        attendance.status = 'present';
         attendance.isLate = isLate;
         attendance.lateMinutes = lateMinutes;
+        attendance.isEarlyCheckin = isEarlyCheckin;
+        attendance.earlyCheckinMinutes = earlyCheckinMinutes;
+        attendance.isGraceUsed = isGraceUsed;
+        attendance.officeStartTime = rule.checkInTime;
+        attendance.officeEndTime = rule.checkOutTime;
+        attendance.graceBeforeMinutes = rule.graceBeforeMinutes || 0;
+        attendance.graceAfterMinutes = rule.gracePeriodMinutes || 0;
+        attendance.allowedEarlyCheckinMinutes = rule.allowedEarlyCheckinMinutes || 0;
 
         await attendance.save();
 
@@ -118,20 +231,7 @@ exports.checkOut = async (req, res) => {
         }
 
         const rule = await getUserRule(userId);
-        const checkOutTime = moment(rule.checkOutTime, 'HH:mm');
-        const currentTime = moment(now);
-
-        const isEarlyLeave = currentTime.isBefore(checkOutTime);
-        const earlyLeaveMinutes = isEarlyLeave ? checkOutTime.diff(currentTime, 'minutes') : 0;
-
-        // Calculate working hours
-        const checkInMoment = moment(attendance.checkIn.time);
-        const workingHours = currentTime.diff(checkInMoment, 'hours', true);
-
-        // Calculate overtime
-        const overtimeHours = workingHours > rule.overtimeThreshold
-            ? workingHours - rule.overtimeThreshold
-            : 0;
+        const outcome = computeCheckoutOutcome(rule, attendance.checkIn.time, now);
 
         attendance.checkOut = {
             time: now,
@@ -142,18 +242,17 @@ exports.checkOut = async (req, res) => {
             latitude,
             longitude
         };
-        attendance.workingHours = parseFloat(workingHours.toFixed(2));
-        attendance.overtimeHours = parseFloat(overtimeHours.toFixed(2));
-        attendance.isEarlyLeave = isEarlyLeave;
-        attendance.earlyLeaveMinutes = earlyLeaveMinutes;
-        attendance.isOvertime = overtimeHours > 0;
-
-        // Determine status
-        if (workingHours >= rule.halfDayHours && workingHours < rule.fullDayHours) {
-            attendance.status = 'half_day';
-        } else if (workingHours >= rule.fullDayHours) {
-            attendance.status = 'present';
-        }
+        attendance.workingHours = outcome.workingHours;
+        attendance.workingMinutes = outcome.workingMinutes;
+        attendance.overtimeHours = outcome.overtimeHours;
+        attendance.overtimeMinutes = outcome.overtimeMinutes;
+        attendance.isOvertime = outcome.isOvertime;
+        attendance.isEarlyLeave = outcome.isEarlyLeave;
+        attendance.earlyLeaveMinutes = outcome.earlyLeaveMinutes;
+        attendance.status = outcome.status;
+        attendance.isHalfDay = outcome.isHalfDay;
+        attendance.isAbsent = outcome.isAbsent;
+        attendance.officeEndTime = rule.checkOutTime;
 
         await attendance.save();
 
@@ -248,12 +347,17 @@ exports.getTodayAttendance = async (req, res) => {
         const today = moment().startOf('day').toDate();
 
         const attendance = await AttendanceRecord.findOne({ user: userId, date: today });
+        const rule = await getUserRule(userId);
 
         if (!attendance) {
             return successResponse(res, {
                 checkedIn: false,
                 checkedOut: false,
-                date: today
+                date: today,
+                officeStartTime: rule.checkInTime,
+                officeEndTime: rule.checkOutTime,
+                graceBeforeMinutes: rule.graceBeforeMinutes || 0,
+                graceAfterMinutes: rule.gracePeriodMinutes || 0
             }, 'No attendance record for today');
         }
 
@@ -264,8 +368,22 @@ exports.getTodayAttendance = async (req, res) => {
             checkOutTime: attendance.checkOut.time,
             status: attendance.status,
             workingHours: attendance.workingHours,
+            workingMinutes: attendance.workingMinutes,
+            overtimeHours: attendance.overtimeHours,
+            overtimeMinutes: attendance.overtimeMinutes,
             isLate: attendance.isLate,
-            isEarlyLeave: attendance.isEarlyLeave
+            lateMinutes: attendance.lateMinutes,
+            isEarlyLeave: attendance.isEarlyLeave,
+            earlyLeaveMinutes: attendance.earlyLeaveMinutes,
+            isEarlyCheckin: attendance.isEarlyCheckin,
+            earlyCheckinMinutes: attendance.earlyCheckinMinutes,
+            isGraceUsed: attendance.isGraceUsed,
+            isHalfDay: attendance.isHalfDay,
+            isAbsent: attendance.isAbsent,
+            officeStartTime: attendance.officeStartTime || rule.checkInTime,
+            officeEndTime: attendance.officeEndTime || rule.checkOutTime,
+            graceBeforeMinutes: attendance.graceBeforeMinutes ?? (rule.graceBeforeMinutes || 0),
+            graceAfterMinutes: attendance.graceAfterMinutes ?? (rule.gracePeriodMinutes || 0)
         }, 'Today attendance status');
     } catch (error) {
         logger.error('Get today attendance error:', error);
@@ -476,16 +594,18 @@ exports.handleCorrectionRequest = async (req, res) => {
             // Recalculate working hours/status once both check-in and check-out are known
             if (attendance.checkIn.time && attendance.checkOut.time) {
                 const rule = await getUserRule(correctionRequest.user);
-                const workingHours = moment(attendance.checkOut.time).diff(moment(attendance.checkIn.time), 'hours', true);
+                const outcome = computeCheckoutOutcome(rule, attendance.checkIn.time, attendance.checkOut.time);
 
-                attendance.workingHours = parseFloat(Math.max(workingHours, 0).toFixed(2));
-                attendance.overtimeHours = rule && workingHours > rule.overtimeThreshold
-                    ? parseFloat((workingHours - rule.overtimeThreshold).toFixed(2))
-                    : 0;
-                attendance.isOvertime = attendance.overtimeHours > 0;
-                attendance.status = rule && workingHours >= rule.halfDayHours && workingHours < rule.fullDayHours
-                    ? 'half_day'
-                    : 'present';
+                attendance.workingHours = outcome.workingHours;
+                attendance.workingMinutes = outcome.workingMinutes;
+                attendance.overtimeHours = outcome.overtimeHours;
+                attendance.overtimeMinutes = outcome.overtimeMinutes;
+                attendance.isOvertime = outcome.isOvertime;
+                attendance.isEarlyLeave = outcome.isEarlyLeave;
+                attendance.earlyLeaveMinutes = outcome.earlyLeaveMinutes;
+                attendance.status = outcome.status;
+                attendance.isHalfDay = outcome.isHalfDay;
+                attendance.isAbsent = outcome.isAbsent;
             } else if (attendance.checkIn.time) {
                 attendance.status = 'present';
             }
@@ -585,6 +705,130 @@ exports.getWorkingHours = async (req, res) => {
         }, 'Working hours summary');
     } catch (error) {
         logger.error('Get working hours error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// Office hours implied by checkInTime/checkOutTime minus the optional lunch
+// break - display-only, never subtracted from an employee's actual clocked
+// working hours.
+const computeExpectedWorkingHours = (rule) => {
+    const start = moment(rule.checkInTime, 'HH:mm');
+    const end = moment(rule.checkOutTime, 'HH:mm');
+    const minutes = Math.max(end.diff(start, 'minutes') - (rule.lunchBreakMinutes || 0), 0);
+    return parseFloat((minutes / 60).toFixed(2));
+};
+
+const getOrCreateDefaultRule = async () => {
+    let rule = await AttendanceRule.findOne({ isDefault: true });
+    if (!rule) {
+        rule = await AttendanceRule.create({ ruleName: 'Default Attendance Rule', isDefault: true, isActive: true });
+    }
+    return rule;
+};
+
+// @desc    Get the default attendance timing/grace-period settings
+// @route   GET /api/attendance/settings
+// @access  Private/Admin
+exports.getAttendanceSettings = async (req, res) => {
+    try {
+        const rule = await getOrCreateDefaultRule();
+        return successResponse(res, {
+            ...rule.toObject(),
+            expectedWorkingHours: computeExpectedWorkingHours(rule)
+        }, 'Attendance settings retrieved');
+    } catch (error) {
+        logger.error('Get attendance settings error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    Update the default attendance timing/grace-period settings
+// @route   PUT /api/attendance/settings
+// @access  Private/Admin
+exports.updateAttendanceSettings = async (req, res) => {
+    try {
+        const {
+            checkInTime, checkOutTime, gracePeriodMinutes, graceBeforeMinutes,
+            allowedEarlyCheckinMinutes, earlyCheckinAction, halfDayHours, fullDayHours,
+            absentThresholdHours, overtimeThreshold, lunchBreakMinutes
+        } = req.body;
+
+        const timeFormat = /^([01]\d|2[0-3]):([0-5]\d)$/;
+        if (checkInTime !== undefined && !timeFormat.test(checkInTime)) {
+            return errorResponse(res, 'Office start time must be in HH:mm format', 400);
+        }
+        if (checkOutTime !== undefined && !timeFormat.test(checkOutTime)) {
+            return errorResponse(res, 'Office end time must be in HH:mm format', 400);
+        }
+
+        const rule = await getOrCreateDefaultRule();
+
+        if (checkInTime !== undefined) rule.checkInTime = checkInTime;
+        if (checkOutTime !== undefined) rule.checkOutTime = checkOutTime;
+        if (moment(rule.checkOutTime, 'HH:mm').isSameOrBefore(moment(rule.checkInTime, 'HH:mm'))) {
+            return errorResponse(res, 'Office end time must be after office start time', 400);
+        }
+        if (gracePeriodMinutes !== undefined) rule.gracePeriodMinutes = gracePeriodMinutes;
+        if (graceBeforeMinutes !== undefined) rule.graceBeforeMinutes = graceBeforeMinutes;
+        if (allowedEarlyCheckinMinutes !== undefined) rule.allowedEarlyCheckinMinutes = allowedEarlyCheckinMinutes;
+        if (earlyCheckinAction !== undefined) rule.earlyCheckinAction = earlyCheckinAction;
+        if (halfDayHours !== undefined) rule.halfDayHours = halfDayHours;
+        if (fullDayHours !== undefined) rule.fullDayHours = fullDayHours;
+        if (absentThresholdHours !== undefined) rule.absentThresholdHours = absentThresholdHours;
+        if (overtimeThreshold !== undefined) rule.overtimeThreshold = overtimeThreshold;
+        if (lunchBreakMinutes !== undefined) rule.lunchBreakMinutes = lunchBreakMinutes;
+        rule.isDefault = true;
+        rule.isActive = true;
+
+        await rule.save();
+
+        logger.info(`Attendance settings updated by admin ${req.user.id}`);
+        return successResponse(res, {
+            ...rule.toObject(),
+            expectedWorkingHours: computeExpectedWorkingHours(rule)
+        }, 'Attendance settings updated');
+    } catch (error) {
+        logger.error('Update attendance settings error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    A single employee's raw attendance records (self or admin)
+// @route   GET /api/attendance/employee/:id
+// @access  Private (self) / Private/Admin (any)
+exports.getEmployeeAttendance = async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (req.user.role !== 'admin' && req.user.id !== id) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+
+        const { page = 1, limit = 30, startDate, endDate, status } = req.query;
+        const query = { user: id };
+        if (status) query.status = status;
+        if (startDate && endDate) {
+            query.date = {
+                $gte: moment(startDate).startOf('day').toDate(),
+                $lte: moment(endDate).endOf('day').toDate()
+            };
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const total = await AttendanceRecord.countDocuments(query);
+        const records = await AttendanceRecord.find(query)
+            .sort({ date: -1 })
+            .skip(skip)
+            .limit(parseInt(limit));
+
+        return paginatedResponse(res, records, {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total,
+            totalPages: Math.ceil(total / parseInt(limit))
+        });
+    } catch (error) {
+        logger.error('Get employee attendance error:', error);
         return errorResponse(res, error.message, 500);
     }
 };

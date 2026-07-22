@@ -51,7 +51,7 @@ exports.updateSetting = async (req, res) => {
     }
 };
 
-// @desc    Create new setting
+// @desc    Create new setting 
 // @route   POST /api/settings
 // @access  Private/Admin
 exports.createSetting = async (req, res) => {
@@ -72,6 +72,7 @@ exports.getAttendanceRules = async (req, res) => {
         const rules = await AttendanceRule.find();
         return successResponse(res, rules, 'Attendance rules retrieved');
     } catch (error) {
+
         logger.error('Get attendance rules error:', error);
         return errorResponse(res, error.message, 500);
     }
@@ -90,16 +91,18 @@ exports.createAttendanceRule = async (req, res) => {
     }
 };
 
-// @desc    Update attendance rule
+// @desc    Update attendance rule        
 // @route   PUT /api/settings/attendance-rules/:id
 // @access  Private/Admin
-exports.updateAttendanceRule = async (req, res) => {
+exports.updateAttendanceRule = async (req, res) => { 
     try {
+
         const rule = await AttendanceRule.findByIdAndUpdate(
             req.params.id,
             req.body,
             { new: true, runValidators: true }
         );
+
         if (!rule) return errorResponse(res, 'Rule not found', 404);
         return successResponse(res, rule, 'Attendance rule updated');
     } catch (error) {

@@ -236,6 +236,151 @@ exports.getEmployeeReport = async (req, res) => {
     }
 };
 
+// @desc    Current user's own monthly attendance summary (self-service alias
+//          for getEmployeeReport - no :id needed, always the caller's own)
+// @route   GET /api/attendance/monthly-summary
+// @access  Private
+exports.getMyMonthlySummary = (req, res) => {
+    req.params.id = req.user.id;
+    return exports.getEmployeeReport(req, res);
+};
+
+// @desc    Day-by-day attendance calendar for one employee, for a given
+//          month - one entry per calendar day so the frontend can render an
+//          actual calendar grid (check-in/out, late/early/overtime flags,
+//          weekend, holiday, leave type). Self or admin, same access rule as
+//          getEmployeeReport above.
+// @route   GET /api/attendance/calendar/:id
+// @access  Private (self) / Private/Admin (any)
+exports.getAttendanceCalendar = async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (req.user.role !== 'admin' && req.user.id !== id) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+
+        const user = await User.findById(id).select('firstName lastName employeeCode department designation');
+        if (!user) return errorResponse(res, 'Employee not found', 404);
+
+        const now = moment.tz(TZ);
+        const month = parseInt(req.query.month) || (now.month() + 1);
+        const year = parseInt(req.query.year) || now.year();
+
+        const monthStart = moment.tz([year, month - 1, 1], TZ).startOf('day');
+        const monthEnd = moment(monthStart).endOf('month');
+        const today = moment.tz(TZ).startOf('day');
+
+        const [weekendConfigs, holidays, leaveRequests, attendanceRecords] = await Promise.all([
+            WeekendConfig.find({ isWeekend: true, isActive: true }),
+            Holiday.find({ isActive: true, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } }),
+            LeaveRequest.find({
+                user: id,
+                status: 'approved',
+                startDate: { $lte: monthEnd.toDate() },
+                endDate: { $gte: monthStart.toDate() }
+            }).populate('leaveType', 'name isPaid colorCode'),
+            AttendanceRecord.find({ user: id, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } })
+        ]);
+
+        const weekendDaySet = new Set(weekendConfigs.length ? weekendConfigs.map((w) => w.dayOfWeek) : ['sunday']);
+        const holidayByDate = new Map(holidays.map((h) => [moment(h.date).format('YYYY-MM-DD'), h]));
+        const recordByDate = new Map(attendanceRecords.map((r) => [moment(r.date).format('YYYY-MM-DD'), r]));
+
+        const leaveByDate = new Map();
+        leaveRequests.forEach((lr) => {
+            const start = moment.max(moment(lr.startDate), monthStart);
+            const end = moment.min(moment(lr.endDate), monthEnd);
+            const cursor = start.clone();
+            while (cursor.isSameOrBefore(end, 'day')) {
+                leaveByDate.set(cursor.format('YYYY-MM-DD'), lr.leaveType);
+                cursor.add(1, 'day');
+            }
+        });
+
+        const days = [];
+        const cursor = monthStart.clone();
+        while (cursor.isSameOrBefore(monthEnd, 'day')) {
+            const dateKey = cursor.format('YYYY-MM-DD');
+            const dayOfWeek = cursor.format('dddd').toLowerCase();
+            const record = recordByDate.get(dateKey);
+            const holiday = holidayByDate.get(dateKey);
+            const leaveType = leaveByDate.get(dateKey);
+            const isWeekendDay = weekendDaySet.has(dayOfWeek);
+
+            let status;
+            let extra = {};
+            if (record) {
+                status = record.status;
+                extra = {
+                    checkIn: record.checkIn?.time || null,
+                    checkOut: record.checkOut?.time || null,
+                    workingHours: record.workingHours,
+                    workingMinutes: record.workingMinutes,
+                    overtimeHours: record.overtimeHours,
+                    overtimeMinutes: record.overtimeMinutes,
+                    isLate: record.isLate,
+                    lateMinutes: record.lateMinutes,
+                    isEarlyLeave: record.isEarlyLeave,
+                    earlyLeaveMinutes: record.earlyLeaveMinutes,
+                    isEarlyCheckin: record.isEarlyCheckin,
+                    earlyCheckinMinutes: record.earlyCheckinMinutes,
+                    isGraceUsed: record.isGraceUsed,
+                    isOvertime: record.isOvertime,
+                    isHalfDay: record.isHalfDay,
+                    isAbsent: record.isAbsent,
+                    officeStartTime: record.officeStartTime,
+                    officeEndTime: record.officeEndTime,
+                    graceBeforeMinutes: record.graceBeforeMinutes,
+                    graceAfterMinutes: record.graceAfterMinutes,
+                    notes: record.notes
+                };
+            } else if (isWeekendDay) {
+                status = 'weekend';
+            } else if (holiday) {
+                status = 'holiday';
+            } else if (leaveType) {
+                status = 'on_leave';
+            } else if (cursor.isAfter(today)) {
+                status = 'upcoming';
+            } else {
+                status = 'absent';
+            }
+
+            days.push({
+                date: dateKey,
+                day: cursor.date(),
+                dayOfWeek: cursor.format('dddd'),
+                status,
+                isWeekend: isWeekendDay,
+                holidayName: holiday ? holiday.name : null,
+                leaveType: leaveType ? { name: leaveType.name, isPaid: leaveType.isPaid, colorCode: leaveType.colorCode } : null,
+                ...extra
+            });
+
+            cursor.add(1, 'day');
+        }
+
+        const summary = await getMonthlyAttendanceSummary(id, month, year);
+
+        return successResponse(res, {
+            month,
+            year,
+            employee: {
+                id: user._id,
+                employeeCode: user.employeeCode,
+                name: fullName(user),
+                department: user.department || null,
+                designation: user.designation || null
+            },
+            days,
+            summary
+        }, 'Attendance calendar retrieved');
+    } catch (error) {
+        logger.error('Get attendance calendar error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
 // @desc    Today + month-to-date attendance dashboard
 // @route   GET /api/attendance/dashboard
 // @access  Private/Admin

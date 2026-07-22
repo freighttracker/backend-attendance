@@ -1550,7 +1550,7 @@
             "url": { "raw": "{{base_url}}/api/settings/attendance-rules", "host": ["{{base_url}}"], "path": ["api", "settings", "attendance-rules"] },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Standard Shift\",\n  \"checkInTime\": \"09:00\",\n  \"checkOutTime\": \"18:00\",\n  \"gracePeriodMinutes\": 15,\n  \"halfDayHours\": 4,\n  \"fullDayHours\": 8,\n  \"overtimeThreshold\": 9,\n  \"isDefault\": true,\n  \"isActive\": true\n}"
+              "raw": "{\n  \"ruleName\": \"Standard Shift\",\n  \"checkInTime\": \"09:00\",\n  \"checkOutTime\": \"18:00\",\n  \"gracePeriodMinutes\": 15,\n  \"halfDayHours\": 4,\n  \"fullDayHours\": 8,\n  \"overtimeThreshold\": 8,\n  \"overtimeRateMultiplier\": 1.5,\n  \"lateMarkAfterMinutes\": 15,\n  \"earlyLeaveBeforeMinutes\": 15,\n  \"isDefault\": true,\n  \"isActive\": true\n}"
             }
           }
         },

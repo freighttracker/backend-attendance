@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+.git
+.gitignore
+.vscode
+logs
+*.log
+uploads/avatars/*
+uploads/documents/*
+!uploads/avatars/.gitkeep
+!uploads/documents/.gitkeep
+tests
+postman
+sample-data
+README.md

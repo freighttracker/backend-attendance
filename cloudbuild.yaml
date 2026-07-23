@@ -1,0 +1,47 @@
+steps:
+  # Build Docker image
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "asia-south2-docker.pkg.dev/$PROJECT_ID/backend-images/attendance-backend:$COMMIT_SHA"
+      - "-t"
+      - "asia-south2-docker.pkg.dev/$PROJECT_ID/backend-images/attendance-backend:latest"
+      - "-f"
+      - "Dockerfile"
+      - "."
+
+  # Push Docker image
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "--all-tags"
+      - "asia-south2-docker.pkg.dev/$PROJECT_ID/backend-images/attendance-backend"
+
+  # Deploy to Cloud Run
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    entrypoint: gcloud
+    args:
+      - "run"
+      - "deploy"
+      - "attendance-backend"
+      - "--image=asia-south2-docker.pkg.dev/$PROJECT_ID/backend-images/attendance-backend:$COMMIT_SHA"
+      - "--region=asia-south2"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+      - "--port=8080"
+      - "--memory=512Mi"
+      - "--min-instances=0"
+      - "--max-instances=10"
+      - "--set-env-vars=NODE_ENV=production,JWT_EXPIRE=7d,JWT_REFRESH_EXPIRE=30d,SMTP_HOST=smtp.gmail.com,SMTP_PORT=587,SMTP_USER=your@email.com"
+      - "--set-secrets=MONGODB_URI=mongodb-uri:latest,JWT_SECRET=jwt-secret:latest,JWT_REFRESH_SECRET=jwt-refresh-secret:latest,SMTP_PASS=smtp-pass:latest"
+      - "--quiet"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: "E2_HIGHCPU_8"
+
+timeout: "1200s"
+
+images:
+  - "asia-south2-docker.pkg.dev/$PROJECT_ID/backend-images/attendance-backend:$COMMIT_SHA"

@@ -1,10 +1,23 @@
 const express = require('express');
 const router = express.Router();
 const { body } = require('express-validator');
+const rateLimit = require('express-rate-limit');
 const authController = require('../controllers/auth.controller');
 const { authenticate } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 
+// Login brute-force protection, kept separate from the general API limiter
+// so it can stay strict without throttling everyone else's normal usage.
+const loginLimiter = rateLimit({
+    windowMs: parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+    max: parseInt(process.env.LOGIN_RATE_LIMIT_MAX_REQUESTS) || 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: 'Too many login attempts. Please try again later.'
+    }
+});
 
 // Register (Admin only)
 router.post('/register', [
@@ -16,7 +29,7 @@ router.post('/register', [
 ], validate, authController.register);
 
 // Login
-router.post('/login', [
+router.post('/login', loginLimiter, [
     body('email').isEmail().withMessage('Valid email is required'),
     body('password').notEmpty().withMessage('Password is required')
 ], validate, authController.login);

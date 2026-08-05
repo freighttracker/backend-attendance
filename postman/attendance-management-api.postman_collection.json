@@ -160,7 +160,6 @@
               "query": [
                 { "key": "page", "value": "1" },
                 { "key": "limit", "value": "10" },
-                { "key": "search", "value": "", "description": "matches firstName/lastName/email/employeeCode" },
                 { "key": "department", "value": "" },
                 { "key": "role", "value": "", "description": "employee | admin" },
                 { "key": "isActive", "value": "", "description": "true | false" }

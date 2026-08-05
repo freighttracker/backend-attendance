@@ -7,7 +7,9 @@ const { logger } = require('../utils/logger');
 // @access  Private (self) / Private/Admin (on behalf of an employee)
 exports.createAdvance = async (req, res) => {
     try {
+
         const { userId, amount, reason, deductionPerMonth, startMonth, startYear } = req.body;
+        
         if (!amount || !deductionPerMonth || !startMonth || !startYear) {
             return errorResponse(res, 'amount, deductionPerMonth, startMonth and startYear are required', 400);
         }

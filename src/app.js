@@ -38,9 +38,13 @@ app.use(cors({
 }));
 
 // Rate limiting
+// General API limiter: shared per IP across all users behind that IP (office NAT, etc.),
+// so this must be high enough to cover normal polling/usage from the whole team, not per-user.
 const limiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000,
+    standardHeaders: true,
+    legacyHeaders: false,
     message: {
         success: false,
         message: 'Too many requests from this IP, please try again later.'

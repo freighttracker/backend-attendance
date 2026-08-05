@@ -7,8 +7,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "jest --runInBand",
-    "seed": "node src/scripts/seeders/masterSeeder.js",
-    "seed:legacy": "node src/scripts/seed.js"
+    "seed": "node src/scripts/seeders/seedAdminOnly.js"
   },
   "dependencies": {
     "@faker-js/faker": "^8.4.1",

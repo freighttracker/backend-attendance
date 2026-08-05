@@ -51,7 +51,7 @@ Create `.env` file with your MongoDB URI and JWT secrets.
 npm run seed
 ```
 
-Default credentials: admin@company.com / admin123
+Default credentials: info@freightrack.co / admin123
 
 ## Start Server
 

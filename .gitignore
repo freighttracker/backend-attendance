@@ -4,6 +4,8 @@ logs/
 *.log
 uploads/avatars/*
 uploads/documents/*
+uploads/leave-attachments/*
 !uploads/avatars/.gitkeep
 !uploads/documents/.gitkeep
+!uploads/leave-attachments/.gitkeep
 .DS_Store

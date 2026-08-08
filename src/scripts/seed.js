@@ -402,6 +402,7 @@ const seedData = async () => {
         totalDays: 2,
         reason: 'Family function',
         status: 'approved',
+        paidStatus: 'paid',
         approvedBy: admin._id,
         approvedAt: new Date()
     });

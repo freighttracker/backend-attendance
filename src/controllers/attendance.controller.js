@@ -14,6 +14,7 @@ const { logger } = require('../utils/logger');
 // Used only if no AttendanceRule document exists at all yet (e.g. a brand
 // new deployment before an admin has visited Settings) so check-in/out never
 // hard-crashes for lack of configuration.
+
 const FALLBACK_RULE = {
     checkInTime: '09:00',
     checkOutTime: '18:00',

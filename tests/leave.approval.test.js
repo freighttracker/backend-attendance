@@ -59,10 +59,11 @@ describe('Leave approval workflow', () => {
         const res = await request(app)
             .put(`/api/leaves/${pendingLeave._id}/status`)
             .set('Authorization', `Bearer ${tokenFor(admin)}`)
-            .send({ status: 'approved' });
+            .send({ status: 'approved', paidStatus: 'unpaid' });
 
         expect(res.status).toBe(200);
         expect(res.body.data.status).toBe('approved');
+        expect(res.body.data.paidStatus).toBe('unpaid');
 
         const balanceAfter = await LeaveBalance.findOne({ user: jane._id, leaveType: pendingLeave.leaveType._id });
         expect(balanceAfter.usedDays).toBe(balanceBefore.usedDays + pendingLeave.totalDays);

@@ -6,6 +6,7 @@ const { logger } = require('../utils/logger');
 // @route   POST /api/payroll/bonuses
 // @access  Private/Admin
 exports.createBonus = async (req, res) => {
+    
     try {
         const { userId, bonusType, amount, month, year, description } = req.body;
         if (!userId || !bonusType || !amount || !month || !year) {
@@ -29,6 +30,7 @@ exports.createBonus = async (req, res) => {
 // @route   GET /api/payroll/bonuses
 // @access  Private/Admin
 exports.getBonuses = async (req, res) => {
+
     try {
         const { page = 1, limit = 20, userId, month, year, status } = req.query;
         const query = {};
@@ -58,6 +60,7 @@ exports.getBonuses = async (req, res) => {
 // @route   GET /api/payroll/bonuses/my
 // @access  Private
 exports.getMyBonuses = async (req, res) => {
+
     try {
         const bonuses = await Bonus.find({ user: req.user.id }).sort({ year: -1, month: -1 });
         return successResponse(res, bonuses, 'Bonuses retrieved');
@@ -65,7 +68,9 @@ exports.getMyBonuses = async (req, res) => {
         logger.error('Get my bonuses error:', error);
         return errorResponse(res, error.message, 500);
     }
+
 };
+
 
 // @desc    Approve a bonus
 // @route   PUT /api/payroll/bonuses/:id/approve

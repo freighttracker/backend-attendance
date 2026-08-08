@@ -35,6 +35,12 @@ const leaveTypeSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    // Only true for Leave Without Pay - bypasses balance checks entirely,
+    // can always be applied regardless of remaining balance.
+    isUnlimited: {
+        type: Boolean,
+        default: false
+    },
     requiresApproval: {
         type: Boolean,
         default: true

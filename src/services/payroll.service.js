@@ -122,7 +122,7 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
             status: 'approved',
             startDate: { $lte: monthEnd.toDate() },
             endDate: { $gte: monthStart.toDate() }
-        }).populate('leaveType', 'isPaid name'),
+        }).populate('leaveType', 'name'),
         AttendanceRecord.find({
             user: userId,
             date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() }
@@ -147,7 +147,10 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         const cursor = start.clone();
         while (cursor.isSameOrBefore(end, 'day')) {
             leaveByDate.set(cursor.format('YYYY-MM-DD'), {
-                isPaid: lr.leaveType ? lr.leaveType.isPaid : false,
+                // Paid/unpaid is decided by the admin at approval time
+                // (LeaveRequest.paidStatus), independent of the leave type's
+                // own default.
+                isPaid: lr.paidStatus === 'paid',
                 leaveTypeName: lr.leaveType ? lr.leaveType.name : 'Leave'
             });
             cursor.add(1, 'day');
@@ -306,7 +309,13 @@ const calculateSalary = async (userId, month, year) => {
     pushEarning('foodAllowance', 'Food Allowance', resolveComponent(structure.earnings.foodAllowance, base));
     pushEarning('internetAllowance', 'Internet/Mobile Allowance', resolveComponent(structure.earnings.internetAllowance, base));
 
-    const grossSalary = round2(earnings.reduce((sum, e) => sum + e.amount, 0));
+    // "Gross salary" is the structure's own configured monthly gross, not a
+    // subtotal of whichever earnings happened to be pushed so far - using the
+    // partial subtotal here meant performance incentive/bonus were silently
+    // excluded from the per-day LOP rate below (paid in full no matter how
+    // many days were unpaid leave), and it drifted from monthlyGrossSalary
+    // as soon as those components were nonzero.
+    const grossSalary = round2(monthlyGrossSalary);
 
     pushEarning('performanceIncentive', 'Performance Incentive', resolveComponent(structure.earnings.performanceIncentive, base));
 
@@ -351,8 +360,13 @@ const calculateSalary = async (userId, month, year) => {
         pushDeduction(`otherDeduction_${idx}`, item.name, resolveComponent(item, base));
     });
 
-    // Attendance-driven deductions
-    const perDaySalary = attendance.workingDays > 0 ? grossSalary / attendance.workingDays : 0;
+    // Attendance-driven deductions. Per-day rate is gross salary spread over
+    // every calendar day of the month (e.g. 30000 / 31 = 967.74), not just
+    // working days - weekends/holidays are already "free" by virtue of never
+    // being counted as unpaid leave/absence, they don't need to be excluded
+    // from the denominator too (that would double-count their benefit and
+    // inflate the per-day rate).
+    const perDaySalary = attendance.daysInMonth > 0 ? grossSalary / attendance.daysInMonth : 0;
     const leaveDeductionAmount = perDaySalary * attendance.unpaidLeaveDays;
     pushDeduction('leaveDeduction', 'Leave Deduction (LOP)', leaveDeductionAmount);
 

@@ -53,7 +53,23 @@ const leaveRequestSchema = new mongoose.Schema({
     sandwichLeaveDays: {
         type: Number,
         default: 0
-    }
+    },
+    // Admin decides paid vs unpaid at approval time - independent of the
+    // leave type's own default, and overrides it.
+    paidStatus: {
+        type: String,
+        enum: ['unpaid', 'paid'],
+        default: 'unpaid'
+    },
+    remarks: {
+        type: String,
+        trim: true
+    },
+    editedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    editedAt: Date
 }, {
     timestamps: true
 });

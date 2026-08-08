@@ -162,6 +162,7 @@ const { logger } = require('../utils/logger');
             ].sort((a, b) => new Date(a.effectiveFrom) - new Date(b.effectiveFrom));
 
             return successResponse(res, history, 'Salary revision history retrieved');
+            
         } catch (error) {
             logger.error('Get revision history error:', error);
             return errorResponse(res, error.message, 500);

@@ -7,7 +7,9 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "jest --runInBand",
-    "seed": "node src/scripts/seeders/seedAdminOnly.js"
+    "seed": "node src/scripts/seeders/seedAdminOnly.js",
+    "seed:leave": "node src/scripts/seeders/seedLeaveOnly.js",
+    "migrate:leave-paid-status": "node src/scripts/migrations/backfillLeavePaidStatus.js"
   },
   "dependencies": {
     "@faker-js/faker": "^8.4.1",

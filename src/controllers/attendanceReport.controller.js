@@ -19,41 +19,13 @@ function fullName(user) {
 // Today's at-a-glance status per employee, resolved in a handful of bulk
 // queries (not one per employee) so it stays cheap to compute even for a
 // large filtered employee list.
-async function getTodayStatusMap(userIds) {
-    const dayStart = moment.tz(TZ).startOf('day').toDate();
-    const dayEnd = moment.tz(TZ).endOf('day').toDate();
-    const dayOfWeek = moment.tz(TZ).format('dddd').toLowerCase();
-
-    const [records, weekendConfigs, holidays, leaves] = await Promise.all([
-        AttendanceRecord.find({ user: { $in: userIds }, date: { $gte: dayStart, $lte: dayEnd } }),
-        WeekendConfig.find({ isWeekend: true, isActive: true }),
-        Holiday.find({ isActive: true, date: { $gte: dayStart, $lte: dayEnd } }),
-        LeaveRequest.find({ user: { $in: userIds }, status: 'approved', startDate: { $lte: dayEnd }, endDate: { $gte: dayStart } })
-    ]);
-
-    const recordMap = new Map(records.map((r) => [String(r.user), r.status]));
-    const leaveSet = new Set(leaves.map((l) => String(l.user)));
-    const weekendDaySet = new Set(weekendConfigs.length ? weekendConfigs.map((w) => w.dayOfWeek) : ['saturday', 'sunday']);
-    const isWeekend = weekendDaySet.has(dayOfWeek);
-    const isHoliday = holidays.length > 0;
-
-    const map = new Map();
-    userIds.forEach((id) => {
-        const key = String(id);
-        if (recordMap.has(key)) { map.set(key, recordMap.get(key)); return; }
-        if (isWeekend) { map.set(key, 'weekend'); return; }
-        if (isHoliday) { map.set(key, 'holiday'); return; }
-        if (leaveSet.has(key)) { map.set(key, 'on_leave'); return; }
-        map.set(key, 'absent');
-    });
-    return map;
-}
+async function getTodayStatusMap(userIds) {  }
 
 // Prefers the actual generated slip's real gross/net for the month; falls
 // back to an estimate derived from the active salary structure and this
 // month's salary-day count when no slip has been generated yet. `salarySource`
 // tells the frontend which one it's looking at so it can label it honestly.
-async function resolveSalaryFigures(userId, month, year, workingDays, salaryDays) {
+async function resolveSalaryFigures(userId, month, year, daysInMonth, salaryDays) {
     const [slip, structure] = await Promise.all([
         SalarySlip.findOne({ user: userId, month, year }),
         SalaryStructure.findOne({ user: userId, isActive: true })
@@ -62,8 +34,11 @@ async function resolveSalaryFigures(userId, month, year, workingDays, salaryDays
     if (slip) {
         return { grossSalary: slip.grossSalary, netSalary: slip.netSalary, salarySource: 'slip' };
     }
-    if (structure && workingDays > 0) {
-        const perDay = structure.monthlyGrossSalary / workingDays;
+    if (structure && daysInMonth > 0) {
+        // Same per-day basis as payroll.service.js's calculateSalary() - gross
+        // spread over calendar days in the month, not just working days -
+        // so this estimate never drifts from what a real slip would show.
+        const perDay = structure.monthlyGrossSalary / daysInMonth;
         return { grossSalary: structure.monthlyGrossSalary, netSalary: round2(perDay * salaryDays), salarySource: 'estimated' };
     }
     return { grossSalary: null, netSalary: null, salarySource: 'unavailable' };
@@ -75,7 +50,7 @@ async function buildEmployeeRow(user, month, year, todayStatus) {
     const attendancePct = attendance.workingDays > 0
         ? round2(((attendance.presentDays + attendance.halfDays * 0.5) / attendance.workingDays) * 100)
         : 0;
-    const { grossSalary, netSalary, salarySource } = await resolveSalaryFigures(user._id, month, year, attendance.workingDays, salaryDays);
+    const { grossSalary, netSalary, salarySource } = await resolveSalaryFigures(user._id, month, year, attendance.daysInMonth, salaryDays);
 
     return {
         id: user._id,
@@ -203,7 +178,7 @@ exports.getEmployeeReport = async (req, res) => {
         const attendancePct = attendance.workingDays > 0
             ? round2(((attendance.presentDays + attendance.halfDays * 0.5) / attendance.workingDays) * 100)
             : 0;
-        const { netSalary } = await resolveSalaryFigures(id, month, year, attendance.workingDays, salaryDays);
+        const { netSalary } = await resolveSalaryFigures(id, month, year, attendance.daysInMonth, salaryDays);
 
         return successResponse(res, {
             month,

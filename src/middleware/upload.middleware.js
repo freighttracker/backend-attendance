@@ -1,12 +1,18 @@
+const fs = require('fs');
 const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+
+const LEAVE_ATTACHMENTS_DIR = 'uploads/leave-attachments/';
+fs.mkdirSync(LEAVE_ATTACHMENTS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         let uploadPath = 'uploads/';
         if (file.fieldname === 'avatar') {
             uploadPath += 'avatars/';
+        } else if (file.fieldname === 'medicalCertificate') {
+            uploadPath = LEAVE_ATTACHMENTS_DIR;
         } else if (file.fieldname === 'file') {
             uploadPath += 'documents/';
         }
@@ -19,13 +25,13 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'text/csv'];
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'text/csv'];
     if (allowedTypes.includes(file.mimetype)) {
         cb(null, true);
     } else {
-        cb(new Error('Invalid file type. Only images and Excel files are allowed.'), false);
+        cb(new Error('Invalid file type. Only images, PDF and Excel files are allowed.'), false);
     }
-}; 
+};
 
 const upload = multer({
     storage,

@@ -15,6 +15,19 @@ const { logger } = require('../utils/logger');
 
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const PRESENT_STATUSES = ['present', 'half_day', 'wfh'];
+const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
+
+// A month that hasn't finished yet has no way to know its final attendance,
+// so generating for it always yields a misleadingly low/zero deduction
+// snapshot (0 absences recorded simply because those days haven't happened
+// yet) that can then get approved/published and never corrected. Only
+// months that have fully elapsed may be generated.
+const assertMonthHasElapsed = (month, year) => {
+    const monthEnd = moment.tz([year, month - 1, 1], TZ).endOf('month');
+    if (monthEnd.isAfter(moment.tz(TZ))) {
+        throw new Error(`Cannot generate payroll for ${month}/${year} - that month has not ended yet`);
+    }
+};
 
 // Builds the trailing `count` months (oldest first, ending at month/year inclusive)
 // used to drive the dashboard's trend/attendance/expense charts.
@@ -43,6 +56,8 @@ const SLIP_FIELDS = [
 // All DB writes happen inside the caller-supplied session so a bulk run
 // never leaves half-applied bonus/loan bookkeeping behind on failure.
 const generateSlipForUser = async (userId, month, year, actorId, session) => {
+    assertMonthHasElapsed(month, year);
+
     const existing = await SalarySlip.findOne({ user: userId, month, year }).session(session);
     if (existing && (existing.isLocked || ['published', 'paid'].includes(existing.status))) {
         throw new Error('Salary slip is locked or already published and cannot be regenerated');

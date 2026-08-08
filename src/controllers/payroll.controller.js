@@ -656,6 +656,11 @@ const PAYROLL_SETTINGS_SCHEMA = [
         field: 'latePolicy', settingKey: 'payroll_late_policy', settingType: 'json',
         default: [{ lateCount: 3, deductionDays: 0.5 }, { lateCount: 6, deductionDays: 1 }],
         description: 'Late-arrival deduction tiers used during payroll calculation'
+    },
+    {
+        field: 'attendanceTrackingStartDate', settingKey: 'attendance_tracking_start_date', settingType: 'string',
+        default: null,
+        description: 'Date attendance tracking began (YYYY-MM-DD). Working days before this date with no record are paid as present instead of counted as absent/LOP - protects payroll for the period before the company started using this system.'
     }
 ];
 

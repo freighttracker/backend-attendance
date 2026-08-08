@@ -33,6 +33,18 @@ const getLatePolicy = async () => {
     return setting.settingValue;
 };
 
+// Working days before this date with no attendance record are treated as a
+// normal present/paid day rather than absence (LOP) - protects payroll for
+// the period before the company actually started using attendance tracking,
+// where "no record" means "not captured yet", not "didn't show up".
+// null/unset means every past working day without a record is LOP, as before.
+const getAttendanceTrackingStartDate = async () => {
+    const setting = await SystemSetting.findOne({ settingKey: 'attendance_tracking_start_date' });
+    if (!setting || !setting.settingValue) return null;
+    const parsed = moment.tz(setting.settingValue, TZ).startOf('day');
+    return parsed.isValid() ? parsed : null;
+};
+
 const getCompanyProfile = async () => {
     const keys = ['company_name', 'company_address', 'company_logo', 'company_pan', 'company_bank_name'];
     const settings = await SystemSetting.find({ settingKey: { $in: keys } });
@@ -114,7 +126,7 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
     const today = moment.tz(TZ).endOf('day');
     const daysInMonth = monthStart.daysInMonth();
 
-    const [weekendConfigs, holidays, leaveRequests, attendanceRecords] = await Promise.all([
+    const [weekendConfigs, holidays, leaveRequests, attendanceRecords, trackingStartDate] = await Promise.all([
         WeekendConfig.find({ isWeekend: true, isActive: true }),
         Holiday.find({ isActive: true, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } }),
         LeaveRequest.find({
@@ -126,7 +138,8 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         AttendanceRecord.find({
             user: userId,
             date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() }
-        })
+        }),
+        getAttendanceTrackingStartDate()
     ]);
 
     const weekendDaySet = new Set(
@@ -211,8 +224,13 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         } else if (leave) {
             if (leave.isPaid) summary.paidLeaveDays += 1;
             else summary.unpaidLeaveDays += 1;
+        } else if (trackingStartDate && cursor.isBefore(trackingStartDate)) {
+            // Before attendance tracking started company-wide - "no record"
+            // here means "not captured yet", not absence. Pay it normally.
+            summary.presentDays += 1;
         } else if (cursor.isBefore(today)) {
-            // Working day, in the past, no record and no approved leave -> LOP
+            // Working day, in the past (on/after tracking start), no record
+            // and no approved leave -> LOP
             summary.absentDays += 1;
             summary.unpaidLeaveDays += 1;
         }
@@ -485,6 +503,7 @@ const releaseSlipSideEffects = async (salarySlip, session) => {
 module.exports = {
     round2,
     getLatePolicy,
+    getAttendanceTrackingStartDate,
     getCompanyProfile,
     getEffectiveStructure,
     getMonthlyAttendanceSummary,

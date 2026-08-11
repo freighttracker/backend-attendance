@@ -57,7 +57,6 @@ exports.checkIn = async (req, res) => {
         if (attendance && attendance.checkIn.time) {
             return errorResponse(res, 'Already checked in today', 400);
         }
-
         const rule = await getUserRule(userId);
         const checkInTime = moment(rule.checkInTime, 'HH:mm');
         const currentTime = moment(now);

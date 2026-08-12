@@ -216,7 +216,7 @@ exports.getAllLeaves = async (req, res) => {
 // @access  Private/Admin
 exports.updateLeaveStatus = async (req, res) => {
     try {
-        const { status, rejectionReason, paidStatus, remarks } = req.body;
+        const { status, rejectionReason, paidStatus, paidDays, unpaidDays, remarks } = req.body;
         const leaveId = req.params.id;
 
         const leaveRequest = await LeaveRequest.findById(leaveId).populate('leaveType');
@@ -228,8 +228,30 @@ exports.updateLeaveStatus = async (req, res) => {
             return errorResponse(res, 'Leave request already processed', 400);
         }
 
-        if (status === 'approved' && !['paid', 'unpaid'].includes(paidStatus)) {
-            return errorResponse(res, 'paidStatus (paid|unpaid) is required when approving a leave request', 400);
+        if (status === 'approved' && !['paid', 'unpaid', 'partial'].includes(paidStatus)) {
+            return errorResponse(res, 'paidStatus (paid|unpaid|partial) is required when approving a leave request', 400);
+        }
+
+        let resolvedPaidDays = 0;
+        let resolvedUnpaidDays = 0;
+        if (status === 'approved') {
+            if (paidStatus === 'paid') {
+                resolvedPaidDays = leaveRequest.totalDays;
+                resolvedUnpaidDays = 0;
+            } else if (paidStatus === 'unpaid') {
+                resolvedPaidDays = 0;
+                resolvedUnpaidDays = leaveRequest.totalDays;
+            } else {
+                // partial - admin supplies the split explicitly
+                resolvedPaidDays = Number(paidDays);
+                resolvedUnpaidDays = Number(unpaidDays);
+                if (!Number.isFinite(resolvedPaidDays) || !Number.isFinite(resolvedUnpaidDays) || resolvedPaidDays < 0 || resolvedUnpaidDays < 0) {
+                    return errorResponse(res, 'paidDays and unpaidDays must be non-negative numbers for a partial approval', 400);
+                }
+                if (Math.abs((resolvedPaidDays + resolvedUnpaidDays) - leaveRequest.totalDays) > 0.001) {
+                    return errorResponse(res, `Paid Leave Days + Unpaid Leave Days must equal Total Leave Days (${leaveRequest.totalDays})`, 400);
+                }
+            }
         }
 
         leaveRequest.status = status;
@@ -242,6 +264,8 @@ exports.updateLeaveStatus = async (req, res) => {
         if (status === 'approved') {
             // Admin's paid/unpaid decision overrides the leave type's own default
             leaveRequest.paidStatus = paidStatus;
+            leaveRequest.paidDays = resolvedPaidDays;
+            leaveRequest.unpaidDays = resolvedUnpaidDays;
             await leaveRequest.save();
 
             const currentYear = new Date(leaveRequest.startDate).getFullYear();
@@ -264,11 +288,15 @@ exports.updateLeaveStatus = async (req, res) => {
             await leaveRequest.save();
         }
 
+        const approvalPayNote = leaveRequest.paidStatus === 'partial'
+            ? `partial (${leaveRequest.paidDays} paid / ${leaveRequest.unpaidDays} unpaid)`
+            : leaveRequest.paidStatus;
+
         await Notification.create({
             user: leaveRequest.user,
             title: `Leave ${status === 'approved' ? 'Approved' : 'Rejected'}`,
             message: status === 'approved'
-                ? `Your ${leaveRequest.leaveType.name} request has been approved as ${leaveRequest.paidStatus}.`
+                ? `Your ${leaveRequest.leaveType.name} request has been approved as ${approvalPayNote}.`
                 : `Your ${leaveRequest.leaveType.name} request was rejected.${rejectionReason ? ` Reason: ${rejectionReason}` : ''}`,
             type: status === 'approved' ? 'success' : 'error',
             actionUrl: '/leave'
@@ -290,6 +318,7 @@ exports.updateLeaveStatus = async (req, res) => {
 // @route   PUT /api/leaves/:id/cancel
 // @access  Private
 exports.cancelLeave = async (req, res) => {
+    
     try {
         const leaveId = req.params.id;
         const isAdmin = req.user.role === 'admin';
@@ -311,7 +340,9 @@ exports.cancelLeave = async (req, res) => {
         const year = new Date(leaveRequest.startDate).getFullYear();
 
         if (leaveRequest.status === 'pending') {
+
             await leaveService.revertPending(leaveRequest.user, leaveRequest.leaveType._id, year, leaveRequest.totalDays);
+
         } else {
             await leaveService.revertUsed(leaveRequest.user, leaveRequest.leaveType._id, year, leaveRequest.totalDays);
             await leaveService.syncAttendanceForLeaveRange(
@@ -445,6 +476,23 @@ exports.updateLeaveRequest = async (req, res) => {
                 await leaveService.syncAttendanceForLeaveRange(
                     leaveRequest.user, newLeaveType.name, newStart, newEnd, 'mark'
                 );
+            }
+        }
+
+        // totalDays may have changed - keep paidDays/unpaidDays consistent
+        // with it so they never drift from the paidStatus + totalDays
+        // invariant payroll relies on.
+        if (leaveRequest.status === 'approved' && newDays !== oldDays) {
+            if (leaveRequest.paidStatus === 'paid') {
+                leaveRequest.paidDays = newDays;
+                leaveRequest.unpaidDays = 0;
+            } else if (leaveRequest.paidStatus === 'unpaid') {
+                leaveRequest.paidDays = 0;
+                leaveRequest.unpaidDays = newDays;
+            } else if (leaveRequest.paidStatus === 'partial') {
+                const clampedPaidDays = Math.min(leaveRequest.paidDays, newDays);
+                leaveRequest.paidDays = clampedPaidDays;
+                leaveRequest.unpaidDays = newDays - clampedPaidDays;
             }
         }
 

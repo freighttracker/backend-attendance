@@ -1,3 +1,4 @@
+const moment = require('moment-timezone');
 const request = require('supertest');
 const { connect, closeDatabase } = require('./helpers/db');
 const { tokenFor } = require('./helpers/auth');
@@ -80,5 +81,49 @@ describe('Attendance correction approval workflow', () => {
 
         const after = await AttendanceRecord.findById(remaining.attendanceRecord._id || remaining.attendanceRecord);
         expect(after.checkOut?.time?.toString()).toBe(before.checkOut?.time?.toString());
+    });
+});
+
+describe('Requested correction times are interpreted in IST regardless of server timezone', () => {
+    // Regression test for a bug where a naive "date + HH:mm" string (as sent
+    // by the frontend, with no UTC offset) was parsed with plain `new Date()`
+    // - correct only when the Node process's own timezone happens to be IST.
+    // On a UTC server (the common case for Docker/cloud deployments) that
+    // silently shifted every requested time by +5:30, e.g. an employee typing
+    // "10:00" ended up stored as 15:30 IST.
+    test('a "10:00" check-in request resolves to 10:00 AM IST, not 10:00 in the server\'s own zone', async () => {
+        const date = moment().subtract(3, 'days').format('YYYY-MM-DD');
+
+        const res = await request(app)
+            .post('/api/attendance/correction')
+            .set('Authorization', `Bearer ${tokenFor(jane)}`)
+            .send({ date, requestedCheckIn: `${date}T10:00:00`, reason: 'Forgot to check in' });
+
+        expect(res.status).toBe(201);
+        const stored = moment(res.body.data.requestedCheckIn).tz('Asia/Kolkata');
+        expect(stored.format('HH:mm')).toBe('10:00');
+    });
+});
+
+describe('Admin can correct an obviously wrong requested time when approving', () => {
+    test('supplying requestedCheckOut on approval overrides the employee\'s original submission', async () => {
+        const date = moment().subtract(4, 'days').format('YYYY-MM-DD');
+
+        // Employee accidentally picks AM instead of PM for checkout.
+        const applyRes = await request(app)
+            .post('/api/attendance/correction')
+            .set('Authorization', `Bearer ${tokenFor(jane)}`)
+            .send({ date, requestedCheckIn: `${date}T09:00:00`, requestedCheckOut: `${date}T00:17:00`, reason: 'Mis-picked AM/PM' });
+        expect(applyRes.status).toBe(201);
+        const requestId = applyRes.body.data._id;
+
+        const approveRes = await request(app)
+            .put(`/api/attendance/corrections/${requestId}`)
+            .set('Authorization', `Bearer ${tokenFor(admin)}`)
+            .send({ status: 'approved', requestedCheckOut: `${date}T12:17:00` });
+
+        expect(approveRes.status).toBe(200);
+        const corrected = moment(approveRes.body.data.requestedCheckOut).tz('Asia/Kolkata');
+        expect(corrected.format('HH:mm')).toBe('12:17');
     });
 });

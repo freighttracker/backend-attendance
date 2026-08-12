@@ -47,8 +47,16 @@ router.put(
         body('status').isIn(['approved', 'rejected']).withMessage('Status must be approved or rejected'),
         body('paidStatus')
             .if(body('status').equals('approved'))
-            .isIn(['paid', 'unpaid'])
-            .withMessage('paidStatus (paid|unpaid) is required when approving')
+            .isIn(['paid', 'unpaid', 'partial'])
+            .withMessage('paidStatus (paid|unpaid|partial) is required when approving'),
+        body('paidDays')
+            .if(body('paidStatus').equals('partial'))
+            .isFloat({ min: 0 })
+            .withMessage('paidDays must be a non-negative number for a partial approval'),
+        body('unpaidDays')
+            .if(body('paidStatus').equals('partial'))
+            .isFloat({ min: 0 })
+            .withMessage('unpaidDays must be a non-negative number for a partial approval')
     ],
     validate,
     leaveController.updateLeaveStatus

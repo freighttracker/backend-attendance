@@ -24,6 +24,8 @@ const run = async () => {
     for (const leaveRequest of approved) {
         const wasPaid = leaveRequest.leaveType ? leaveRequest.leaveType.isPaid : false;
         leaveRequest.paidStatus = wasPaid ? 'paid' : 'unpaid';
+        leaveRequest.paidDays = wasPaid ? leaveRequest.totalDays : 0;
+        leaveRequest.unpaidDays = wasPaid ? 0 : leaveRequest.totalDays;
         await leaveRequest.save();
         wasPaid ? paidCount++ : unpaidCount++;
     }

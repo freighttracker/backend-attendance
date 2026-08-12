@@ -115,6 +115,39 @@ const getEffectiveStructure = async (userId, month, year) => {
     return { structureId: structure._id, ...matches[0] };
 };
 
+// For a 'partial' leave request, allocates the admin's paidDays count across
+// the request's own working days (chronological order, skipping weekends/
+// holidays the same way calculateWorkingDays does) so a leave spanning a
+// month boundary still gets a consistent split no matter which month is
+// being paid. Queries holidays over the request's own full range rather than
+// reusing the caller's month-scoped holiday set, since that range can extend
+// outside the month being paid.
+const buildPartialLeavePaidDateSet = async (leaveRequest, weekendDaySet) => {
+    const start = moment(leaveRequest.startDate).startOf('day');
+    const end = moment(leaveRequest.endDate).startOf('day');
+    const rangeHolidays = await Holiday.find({
+        isActive: true,
+        date: { $gte: start.toDate(), $lte: end.toDate() }
+    });
+    const holidayDateSet = new Set(rangeHolidays.map(h => moment(h.date).format('YYYY-MM-DD')));
+
+    const paidDateSet = new Set();
+    let remainingPaidDays = leaveRequest.paidDays || 0;
+    const cursor = start.clone();
+    while (cursor.isSameOrBefore(end, 'day')) {
+        const dateStr = cursor.format('YYYY-MM-DD');
+        const dayOfWeek = cursor.format('dddd').toLowerCase();
+        if (!weekendDaySet.has(dayOfWeek) && !holidayDateSet.has(dateStr)) {
+            if (remainingPaidDays > 0) {
+                paidDateSet.add(dateStr);
+                remainingPaidDays -= 1;
+            }
+        }
+        cursor.add(1, 'day');
+    }
+    return paidDateSet;
+};
+
 // ---------------------------------------------------------------------------
 // Attendance + leave reconciliation for the month, day by day, so weekends,
 // holidays, approved paid/unpaid leave and unapproved absence are never
@@ -135,6 +168,7 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
             startDate: { $lte: monthEnd.toDate() },
             endDate: { $gte: monthStart.toDate() }
         }).populate('leaveType', 'name'),
+        
         AttendanceRecord.find({
             user: userId,
             date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() }
@@ -152,23 +186,31 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
     const attendanceByDate = new Map();
     attendanceRecords.forEach(r => attendanceByDate.set(moment(r.date).format('YYYY-MM-DD'), r));
 
-    // Expand each approved leave request into per-day paid/unpaid flags
+    // Expand each approved leave request into per-day paid/unpaid flags.
+    // Paid/unpaid is decided by the admin at approval time
+    // (LeaveRequest.paidStatus), independent of the leave type's own
+    // default. A 'partial' approval only carries an aggregate paidDays
+    // count, so it needs a chronological per-day allocation to know which
+    // specific days in this month were the paid ones.
     const leaveByDate = new Map();
-    leaveRequests.forEach(lr => {
+    for (const lr of leaveRequests) {
         const start = moment.max(moment(lr.startDate), monthStart);
         const end = moment.min(moment(lr.endDate), monthEnd);
+
+        const partialPaidDateSet = lr.paidStatus === 'partial'
+            ? await buildPartialLeavePaidDateSet(lr, weekendDaySet)
+            : null;
+
         const cursor = start.clone();
         while (cursor.isSameOrBefore(end, 'day')) {
-            leaveByDate.set(cursor.format('YYYY-MM-DD'), {
-                // Paid/unpaid is decided by the admin at approval time
-                // (LeaveRequest.paidStatus), independent of the leave type's
-                // own default.
-                isPaid: lr.paidStatus === 'paid',
+            const dateStr = cursor.format('YYYY-MM-DD');
+            leaveByDate.set(dateStr, {
+                isPaid: partialPaidDateSet ? partialPaidDateSet.has(dateStr) : lr.paidStatus === 'paid',
                 leaveTypeName: lr.leaveType ? lr.leaveType.name : 'Leave'
             });
             cursor.add(1, 'day');
         }
-    });
+    }
 
     const summary = {
         daysInMonth,
@@ -243,6 +285,7 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
 
 // ---------------------------------------------------------------------------
 // Payable "salary days" for a month - present/holiday/weekly-off count in
+
 // full, half days count as half, unpaid leave and absence count as zero.
 // This is the same accounting calculateSalary() already applies via its
 // per-day-rate deduction math below; exposed as a named value here purely

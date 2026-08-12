@@ -55,11 +55,28 @@ const leaveRequestSchema = new mongoose.Schema({
         default: 0
     },
     // Admin decides paid vs unpaid at approval time - independent of the
-    // leave type's own default, and overrides it.
+    // leave type's own default, and overrides it. 'partial' splits totalDays
+    // across paidDays/unpaidDays below.
     paidStatus: {
         type: String,
-        enum: ['unpaid', 'paid'],
+        enum: ['unpaid', 'paid', 'partial'],
         default: 'unpaid'
+    },
+    // Kept in sync with paidStatus on approval so paidDays + unpaidDays
+    // always equals totalDays: fully paid -> (totalDays, 0), fully unpaid ->
+    // (0, totalDays), partial -> whatever the admin split. Stored explicitly
+    // (rather than derived) so the admin list/history can render the Paid |
+    // Unpaid columns without re-deriving from paidStatus, and so payroll can
+    // allocate specific calendar days for a partial approval.
+    paidDays: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
+    unpaidDays: {
+        type: Number,
+        default: 0,
+        min: 0
     },
     remarks: {
         type: String,

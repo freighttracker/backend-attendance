@@ -11,6 +11,14 @@ const Notification = require('../models/Notification');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 
+// Matches payroll.service.js's TZ - the frontend sends requestedCheckIn/
+// requestedCheckOut as naive "YYYY-MM-DDTHH:mm:ss" strings with no offset
+// (the employee's intended wall-clock time in the business's own timezone).
+// Parsing that with plain `new Date(...)` would interpret it in whatever
+// timezone the Node process happens to run in (UTC on most cloud/Docker
+// hosts), silently shifting every requested time by the UTC-IST offset.
+const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
+
 // Used only if no AttendanceRule document exists at all yet (e.g. a brand
 // new deployment before an admin has visited Settings) so check-in/out never
 // hard-crashes for lack of configuration.
@@ -269,7 +277,9 @@ exports.checkOut = async (req, res) => {
 // @route   GET /api/attendance/history
 // @access  Private
 exports.getAttendanceHistory = async (req, res) => {
+
     try {
+
         const { page = 1, limit = 30, startDate, endDate } = req.query;
         const userId = req.user.id;
 
@@ -305,6 +315,7 @@ exports.getAttendanceHistory = async (req, res) => {
 // @route   GET /api/attendance/all
 // @access  Private/Admin
 exports.getAllAttendance = async (req, res) => {
+
     try {
         const { page = 1, limit = 50, userId, startDate, endDate, status } = req.query;
 
@@ -333,7 +344,9 @@ exports.getAllAttendance = async (req, res) => {
             total,
             totalPages: Math.ceil(total / parseInt(limit))
         });
+
     } catch (error) {
+        
         logger.error('Get all attendance error:', error);
         return errorResponse(res, error.message, 500);
     }
@@ -450,8 +463,8 @@ exports.requestCorrection = async (req, res) => {
             user: userId,
             attendanceRecord: attendance ? attendance._id : undefined,
             date: recordDate,
-            requestedCheckIn: requestedCheckIn ? new Date(requestedCheckIn) : null,
-            requestedCheckOut: requestedCheckOut ? new Date(requestedCheckOut) : null,
+            requestedCheckIn: requestedCheckIn ? moment.tz(requestedCheckIn, TZ).toDate() : null,
+            requestedCheckOut: requestedCheckOut ? moment.tz(requestedCheckOut, TZ).toDate() : null,
             reason
         });
 
@@ -542,7 +555,7 @@ exports.getCorrectionRequests = async (req, res) => {
 // @access  Private/Admin
 exports.handleCorrectionRequest = async (req, res) => {
     try {
-        const { status, rejectionReason } = req.body;
+        const { status, rejectionReason, requestedCheckIn, requestedCheckOut } = req.body;
         const requestId = req.params.id;
 
         const correctionRequest = await AttendanceCorrectionRequest.findById(requestId);
@@ -560,6 +573,14 @@ exports.handleCorrectionRequest = async (req, res) => {
             if (linkedRecord) {
                 correctionRequest.date = linkedRecord.date;
             }
+        }
+
+        // Lets the admin fix an obviously wrong requested time (e.g. an
+        // employee picking AM instead of PM) right when approving, instead
+        // of having to reject and make them resubmit.
+        if (status === 'approved') {
+            if (requestedCheckIn) correctionRequest.requestedCheckIn = moment.tz(requestedCheckIn, TZ).toDate();
+            if (requestedCheckOut) correctionRequest.requestedCheckOut = moment.tz(requestedCheckOut, TZ).toDate();
         }
 
         correctionRequest.status = status;

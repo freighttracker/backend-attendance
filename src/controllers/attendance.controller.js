@@ -85,6 +85,7 @@ const isOnApprovedLeave = async (userId, date) => {
 // approval of a backfilled correction request, so the two paths can never
 // disagree on how a day's status/hours/flags are derived.
 const computeCheckoutOutcome = (rule, checkInTime, checkOutTime) => {
+    
     const checkInMoment = moment(checkInTime);
     const checkOutMoment = moment(checkOutTime);
     const officeEnd = moment(rule.checkOutTime, 'HH:mm');
@@ -124,6 +125,53 @@ const computeCheckoutOutcome = (rule, checkInTime, checkOutTime) => {
         isHalfDay: status === 'half_day',
         isAbsent: status === 'absent'
     };
+};
+
+// Applies a correction to an AttendanceRecord and stamps the audit trail.
+// Shared by the correction-request approval flow and the direct admin
+// correction endpoint so both write the same fields. `status`, when given,
+// is an admin's direct override of the day's outcome (Full/Half Day/Absent
+// etc.) that bypasses the hours-based ladder in computeCheckoutOutcome;
+// otherwise the outcome is recalculated from the (possibly corrected)
+// check-in/check-out times, exactly like a live checkout would.
+const applyAttendanceCorrection = async (attendance, { checkInTime, checkOutTime, status } = {}, adminId, reason) => {
+    const previousStatus = attendance.status;
+
+    if (checkInTime) attendance.checkIn.time = checkInTime;
+    if (checkOutTime) attendance.checkOut.time = checkOutTime;
+
+    if (status) {
+        attendance.status = status;
+        attendance.isHalfDay = status === 'half_day';
+        attendance.isAbsent = status === 'absent';
+    } else if (attendance.checkIn.time && attendance.checkOut.time) {
+        const rule = await getUserRule(attendance.user);
+        const outcome = computeCheckoutOutcome(rule, attendance.checkIn.time, attendance.checkOut.time);
+
+        attendance.workingHours = outcome.workingHours;
+        attendance.workingMinutes = outcome.workingMinutes;
+        attendance.overtimeHours = outcome.overtimeHours;
+        attendance.overtimeMinutes = outcome.overtimeMinutes;
+        attendance.isOvertime = outcome.isOvertime;
+        attendance.isEarlyLeave = outcome.isEarlyLeave;
+        attendance.earlyLeaveMinutes = outcome.earlyLeaveMinutes;
+        attendance.status = outcome.status;
+        attendance.isHalfDay = outcome.isHalfDay;
+        attendance.isAbsent = outcome.isAbsent;
+    } else if (attendance.checkIn.time) {
+        attendance.status = 'present';
+    }
+
+    attendance.isCorrected = true;
+    attendance.correctedBy = adminId;
+    attendance.correctedAt = new Date();
+    attendance.previousStatus = previousStatus;
+    if (reason) attendance.correctionReason = reason;
+    attendance.approvedBy = adminId;
+    attendance.approvedAt = new Date();
+
+    await attendance.save();
+    return attendance;
 };
 
 // @desc    Check-in
@@ -555,8 +603,13 @@ exports.getCorrectionRequests = async (req, res) => {
 // @access  Private/Admin
 exports.handleCorrectionRequest = async (req, res) => {
     try {
-        const { status, rejectionReason, requestedCheckIn, requestedCheckOut } = req.body;
+        const { status, rejectionReason, requestedCheckIn, requestedCheckOut, overrideStatus } = req.body;
         const requestId = req.params.id;
+        const validStatuses = ['present', 'absent', 'half_day', 'on_leave', 'weekend', 'holiday', 'wfh'];
+
+        if (overrideStatus && !validStatuses.includes(overrideStatus)) {
+            return errorResponse(res, `overrideStatus must be one of: ${validStatuses.join(', ')}`, 400);
+        }
 
         const correctionRequest = await AttendanceCorrectionRequest.findById(requestId);
         if (!correctionRequest) {
@@ -581,6 +634,7 @@ exports.handleCorrectionRequest = async (req, res) => {
         if (status === 'approved') {
             if (requestedCheckIn) correctionRequest.requestedCheckIn = moment.tz(requestedCheckIn, TZ).toDate();
             if (requestedCheckOut) correctionRequest.requestedCheckOut = moment.tz(requestedCheckOut, TZ).toDate();
+            if (overrideStatus) correctionRequest.overrideStatus = overrideStatus;
         }
 
         correctionRequest.status = status;
@@ -606,36 +660,11 @@ exports.handleCorrectionRequest = async (req, res) => {
                 });
             }
 
-            if (correctionRequest.requestedCheckIn) {
-                attendance.checkIn.time = correctionRequest.requestedCheckIn;
-            }
-            if (correctionRequest.requestedCheckOut) {
-                attendance.checkOut.time = correctionRequest.requestedCheckOut;
-            }
-
-            // Recalculate working hours/status once both check-in and check-out are known
-            if (attendance.checkIn.time && attendance.checkOut.time) {
-                const rule = await getUserRule(correctionRequest.user);
-                const outcome = computeCheckoutOutcome(rule, attendance.checkIn.time, attendance.checkOut.time);
-
-                attendance.workingHours = outcome.workingHours;
-                attendance.workingMinutes = outcome.workingMinutes;
-                attendance.overtimeHours = outcome.overtimeHours;
-                attendance.overtimeMinutes = outcome.overtimeMinutes;
-                attendance.isOvertime = outcome.isOvertime;
-                attendance.isEarlyLeave = outcome.isEarlyLeave;
-                attendance.earlyLeaveMinutes = outcome.earlyLeaveMinutes;
-                attendance.status = outcome.status;
-                attendance.isHalfDay = outcome.isHalfDay;
-                attendance.isAbsent = outcome.isAbsent;
-            } else if (attendance.checkIn.time) {
-                attendance.status = 'present';
-            }
-
-            attendance.approvedBy = req.user.id;
-            attendance.approvedAt = new Date();
-
-            await attendance.save();
+            await applyAttendanceCorrection(attendance, {
+                checkInTime: correctionRequest.requestedCheckIn,
+                checkOutTime: correctionRequest.requestedCheckOut,
+                status: correctionRequest.overrideStatus
+            }, req.user.id, correctionRequest.reason);
 
             if (!correctionRequest.attendanceRecord) {
                 correctionRequest.attendanceRecord = attendance._id;
@@ -658,6 +687,69 @@ exports.handleCorrectionRequest = async (req, res) => {
         return successResponse(res, correctionRequest, `Correction request ${status}`);
     } catch (error) {
         logger.error('Handle correction error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    Directly correct an attendance record's check-in/check-out time
+//          and/or force its status (Full Day/Half Day/Absent/...), without
+//          needing a pre-existing employee correction request. Admin-only.
+// @route   PUT /api/attendance/correct
+// @access  Private/Admin
+exports.correctAttendanceRecord = async (req, res) => {
+    try {
+        const { attendanceRecordId, userId, date, checkInTime, checkOutTime, status, reason } = req.body;
+        const validStatuses = ['present', 'absent', 'half_day', 'on_leave', 'weekend', 'holiday', 'wfh'];
+
+        if (!reason) {
+            return errorResponse(res, 'Reason is required', 400);
+        }
+        if (!checkInTime && !checkOutTime && !status) {
+            return errorResponse(res, 'Provide a check-in/check-out time and/or a status to correct', 400);
+        }
+        if (status && !validStatuses.includes(status)) {
+            return errorResponse(res, `Status must be one of: ${validStatuses.join(', ')}`, 400);
+        }
+
+        let attendance;
+        if (attendanceRecordId) {
+            attendance = await AttendanceRecord.findById(attendanceRecordId);
+            if (!attendance) {
+                return errorResponse(res, 'Attendance record not found', 404);
+            }
+        } else {
+            if (!userId || !date) {
+                return errorResponse(res, 'Provide attendanceRecordId, or both userId and date', 400);
+            }
+            const recordDate = moment.tz(date, TZ).startOf('day').toDate();
+            attendance = await AttendanceRecord.findOne({ user: userId, date: recordDate });
+            if (!attendance) {
+                attendance = new AttendanceRecord({ user: userId, date: recordDate, status: 'present' });
+            }
+        }
+
+        if (attendance.isLocked) {
+            return errorResponse(res, 'Attendance is locked and cannot be corrected', 400);
+        }
+
+        await applyAttendanceCorrection(attendance, {
+            checkInTime: checkInTime ? moment.tz(checkInTime, TZ).toDate() : undefined,
+            checkOutTime: checkOutTime ? moment.tz(checkOutTime, TZ).toDate() : undefined,
+            status
+        }, req.user.id, reason);
+
+        await Notification.create({
+            user: attendance.user,
+            title: 'Attendance Corrected',
+            message: `Your attendance for ${moment(attendance.date).format('DD MMM YYYY')} was corrected by an admin (now marked as ${attendance.status.replace('_', ' ')}).`,
+            type: 'info',
+            actionUrl: '/attendance/history'
+        });
+
+        logger.info(`Attendance record ${attendance._id} corrected by admin ${req.user.id}`);
+        return successResponse(res, attendance, 'Attendance record corrected');
+    } catch (error) {
+        logger.error('Correct attendance record error:', error);
         return errorResponse(res, error.message, 500);
     }
 };
@@ -820,6 +912,7 @@ exports.updateAttendanceSettings = async (req, res) => {
 // @route   GET /api/attendance/employee/:id
 // @access  Private (self) / Private/Admin (any)
 exports.getEmployeeAttendance = async (req, res) => {
+    
     try {
         const { id } = req.params;
         if (req.user.role !== 'admin' && req.user.id !== id) {

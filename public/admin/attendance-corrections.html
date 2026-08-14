@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attendance Corrections - Admin</title>
+<style>
+    :root {
+        --bg: #f4f6f8;
+        --card: #ffffff;
+        --border: #d9dee3;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --primary: #2563eb;
+        --primary-dark: #1d4ed8;
+        --danger: #dc2626;
+        --success: #16a34a;
+        --half: #d97706;
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+    }
+    header {
+        background: var(--card);
+        border-bottom: 1px solid var(--border);
+        padding: 14px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    header h1 { font-size: 18px; margin: 0; }
+    #whoami { font-size: 13px; color: var(--muted); }
+    main { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+    .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    h2 { font-size: 16px; margin-top: 0; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+    input, select, textarea, button {
+        font-family: inherit;
+        font-size: 14px;
+    }
+    input, select, textarea {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--text);
+    }
+    textarea { resize: vertical; min-height: 50px; }
+    button {
+        cursor: pointer;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 14px;
+        font-weight: 600;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-danger { background: #fff; color: var(--danger); border: 1px solid var(--danger); }
+    .btn-secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row > div { flex: 1; min-width: 160px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab-btn {
+        background: #fff;
+        border: 1px solid var(--border);
+        color: var(--muted);
+    }
+    .tab-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #fff;
+    }
+    .badge-present { background: var(--success); }
+    .badge-half_day { background: var(--half); }
+    .badge-absent { background: var(--danger); }
+    .badge-default { background: var(--muted); }
+    .request-form {
+        display: none;
+        margin-top: 10px;
+        padding: 12px;
+        border: 1px dashed var(--border);
+        border-radius: 6px;
+        background: #fafafa;
+    }
+    .request-form.open { display: block; }
+    .msg { font-size: 13px; margin-top: 8px; }
+    .msg.error { color: var(--danger); }
+    .msg.success { color: var(--success); }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    #loginCard { max-width: 360px; margin: 60px auto; }
+    .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="hidden" id="appHeader">
+    <h1>Attendance Corrections</h1>
+    <div>
+        <span id="whoami"></span>
+        <button class="btn-secondary" id="logoutBtn" style="margin-left:12px;">Log out</button>
+    </div>
+</header>
+
+<main>
+    <div class="card" id="loginCard">
+        <h2>Admin sign in</h2>
+        <label for="loginEmail">Email</label>
+        <input id="loginEmail" type="email" autocomplete="username">
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" type="password" autocomplete="current-password">
+        <button class="btn-primary" id="loginBtn" style="margin-top:14px;">Sign in</button>
+        <div class="msg" id="loginMsg"></div>
+    </div>
+
+    <div id="appBody" class="hidden">
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="pending">Pending Correction Requests</button>
+            <button class="tab-btn" data-tab="direct">Direct Correction</button>
+        </div>
+
+        <section id="tab-pending" class="card">
+            <h2>Pending Correction Requests</h2>
+            <p class="hint">
+                Requested check-in/check-out times are shown exactly as submitted. Approve as-is to let the
+                system auto-compute Full Day / Half Day / Absent from the exact times, or tweak the time
+                and/or pick a status below to have the final word.
+            </p>
+            <button class="btn-secondary" id="refreshPending">Refresh</button>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Employee</th>
+                        <th>Date</th>
+                        <th>Requested check-in</th>
+                        <th>Requested check-out</th>
+                        <th>Reason</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="pendingRows"></tbody>
+            </table>
+            <div class="msg" id="pendingMsg"></div>
+        </section>
+
+        <section id="tab-direct" class="card hidden">
+            <h2>Directly Correct an Employee's Attendance</h2>
+            <p class="hint">
+                Use this when there is no correction request on file. You have full authority to set the
+                exact check-in/check-out time and/or force the day's status (Full Day / Half Day / Absent).
+            </p>
+            <div class="row">
+                <div>
+                    <label for="directEmployee">Employee</label>
+                    <select id="directEmployee"></select>
+                </div>
+                <div>
+                    <label for="directDate">Date</label>
+                    <input id="directDate" type="date">
+                </div>
+            </div>
+            <div class="row">
+                <div>
+                    <label for="directCheckIn">Exact check-in time</label>
+                    <input id="directCheckIn" type="time" step="60">
+                </div>
+                <div>
+                    <label for="directCheckOut">Exact check-out time</label>
+                    <input id="directCheckOut" type="time" step="60">
+                </div>
+                <div>
+                    <label for="directStatus">Force count as (optional)</label>
+                    <select id="directStatus">
+                        <option value="">Auto-calculate from time</option>
+                        <option value="present">Full Day (Present)</option>
+                        <option value="half_day">Half Day</option>
+                        <option value="absent">Absent</option>
+                        <option value="wfh">Work From Home</option>
+                        <option value="on_leave">On Leave</option>
+                    </select>
+                </div>
+            </div>
+            <label for="directReason">Reason for correction</label>
+            <textarea id="directReason" placeholder="e.g. Biometric device was down, confirmed via manager"></textarea>
+            <button class="btn-primary" id="directSubmit" style="margin-top:14px;">Apply Correction</button>
+            <div class="msg" id="directMsg"></div>
+        </section>
+    </div>
+</main>
+
+<script src="attendance-corrections.js" defer></script>
+</body>
+</html>

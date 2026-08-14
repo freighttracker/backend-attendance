@@ -19,6 +19,7 @@ router.get('/employee/:id', authenticate, attendanceController.getEmployeeAttend
 router.get('/all', authenticate, authorize('admin'), attendanceController.getAllAttendance);
 router.get('/corrections', authenticate, authorize('admin'), attendanceController.getCorrectionRequests);
 router.put('/corrections/:id', authenticate, authorize('admin'), attendanceController.handleCorrectionRequest);
+router.put('/correct', authenticate, authorize('admin'), attendanceController.correctAttendanceRecord);
 router.post('/lock', authenticate, authorize('admin'), attendanceController.lockAttendance);
 router.get('/report', authenticate, authorize('admin'), attendanceReportController.getMonthlyReport);
 router.get('/settings', authenticate, authorize('admin'), attendanceController.getAttendanceSettings);

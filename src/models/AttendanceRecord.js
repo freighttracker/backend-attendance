@@ -110,6 +110,27 @@ const attendanceRecordSchema = new mongoose.Schema({
         ref: 'User'
     },
     approvedAt: Date,
+    // Audit trail for admin corrections (either a re-timed check-in/out that
+    // was recalculated, or a direct manual status override) - kept separate
+    // from approvedBy/approvedAt since those are also used for the plain
+    // correction-request approval flow.
+    isCorrected: {
+        type: Boolean,
+        default: false
+    },
+    correctedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    correctedAt: Date,
+    previousStatus: {
+        type: String,
+        enum: ['present', 'absent', 'half_day', 'on_leave', 'weekend', 'holiday', 'wfh']
+    },
+    correctionReason: {
+        type: String,
+        trim: true
+    },
     isLocked: {
         type: Boolean,
         default: false

@@ -16,6 +16,14 @@ const correctionRequestSchema = new mongoose.Schema({
     },
     requestedCheckIn: Date,
     requestedCheckOut: Date,
+    // Admin-only: lets the approver directly force the day's outcome (e.g.
+    // count a borderline checkout as a Full Day) instead of trusting the
+    // hours-based ladder in computeCheckoutOutcome. Set at approval time,
+    // never by the requesting employee.
+    overrideStatus: {
+        type: String,
+        enum: ['present', 'absent', 'half_day', 'on_leave', 'weekend', 'holiday', 'wfh']
+    },
     reason: {
         type: String,
         required: true

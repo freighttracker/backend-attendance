@@ -153,6 +153,7 @@ const buildPartialLeavePaidDateSet = async (leaveRequest, weekendDaySet) => {
 // holidays, approved paid/unpaid leave and unapproved absence are never
 // double counted against each other.
 // ---------------------------------------------------------------------------
+
 const getMonthlyAttendanceSummary = async (userId, month, year) => {
     const monthStart = moment.tz([year, month - 1, 1], TZ).startOf('day');
     const monthEnd = moment(monthStart).endOf('month');
@@ -501,12 +502,15 @@ const calculateSalary = async (userId, month, year) => {
 // already exclude anything already applied/recorded for this month).
 // ---------------------------------------------------------------------------
 const commitSlipSideEffects = async (salaryData, salarySlipId, session) => {
+
     const { pendingBonuses, pendingReimbursements, loanLines, advanceLines } = salaryData._pending;
 
     await Promise.all(pendingBonuses.map(b => {
+
         b.isApplied = true;
         b.salarySlip = salarySlipId;
         return b.save({ session });
+        
     }));
 
     await Promise.all(pendingReimbursements.map(r => {
@@ -516,19 +520,23 @@ const commitSlipSideEffects = async (salaryData, salarySlipId, session) => {
     }));
 
     await Promise.all(loanLines.filter(l => !l.alreadyApplied).map(l => {
+
         const loan = l.doc;
         loan.deductionsApplied.push({ month: salaryData.month, year: salaryData.year, amount: l.amount, salarySlip: salarySlipId });
         loan.remainingBalance = round2(loan.remainingBalance - l.amount);
         if (loan.remainingBalance <= 0) loan.status = 'closed';
         return loan.save({ session });
+
     }));
 
     await Promise.all(advanceLines.filter(a => !a.alreadyApplied).map(a => {
+
         const advance = a.doc;
         advance.deductionsApplied.push({ month: salaryData.month, year: salaryData.year, amount: a.amount, salarySlip: salarySlipId });
         advance.remainingBalance = round2(advance.remainingBalance - a.amount);
         if (advance.remainingBalance <= 0) advance.status = 'closed';
         return advance.save({ session });
+        
     }));
 };
 
@@ -537,10 +545,12 @@ const commitSlipSideEffects = async (salaryData, salarySlipId, session) => {
 // approved). Loan/advance deductionsApplied entries are intentionally left
 // alone - getLoanAndAdvanceDeductions() already reuses them idempotently.
 const releaseSlipSideEffects = async (salarySlip, session) => {
+
     await Promise.all([
         Bonus.updateMany({ salarySlip: salarySlip._id }, { isApplied: false, salarySlip: null }, { session }),
         Reimbursement.updateMany({ salarySlip: salarySlip._id }, { isApplied: false, salarySlip: null }, { session })
     ]);
+
 };
 
 module.exports = {

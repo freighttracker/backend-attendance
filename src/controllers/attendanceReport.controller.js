@@ -35,6 +35,7 @@ async function resolveSalaryFigures(userId, month, year, daysInMonth, salaryDays
         return { grossSalary: slip.grossSalary, netSalary: slip.netSalary, salarySource: 'slip' };
     }
     if (structure && daysInMonth > 0) {
+
         // Same per-day basis as payroll.service.js's calculateSalary() - gross
         // spread over calendar days in the month, not just working days -
         // so this estimate never drifts from what a real slip would show.
@@ -45,6 +46,7 @@ async function resolveSalaryFigures(userId, month, year, daysInMonth, salaryDays
 }
 
 async function buildEmployeeRow(user, month, year, todayStatus) {
+
     const attendance = await getMonthlyAttendanceSummary(user._id, month, year);
     const salaryDays = computeSalaryDays(attendance);
     const attendancePct = attendance.workingDays > 0
@@ -109,6 +111,7 @@ function buildSummary(rows) {
 // @route   GET /api/attendance/report/monthly
 // @access  Private/Admin
 exports.getMonthlyReport = async (req, res) => {
+    
     try {
         const now = moment.tz(TZ);
         const month = parseInt(req.query.month) || (now.month() + 1);
@@ -131,6 +134,7 @@ exports.getMonthlyReport = async (req, res) => {
             .sort({ employeeCode: 1 });
 
         const statusMap = users.length ? await getTodayStatusMap(users.map((u) => u._id)) : new Map();
+
         if (status) {
             users = users.filter((u) => statusMap.get(String(u._id)) === status);
         }
@@ -150,6 +154,7 @@ exports.getMonthlyReport = async (req, res) => {
         return paginatedResponse(res, { month, year, summary, employees }, {
             page, limit, total, totalPages: Math.max(Math.ceil(total / limit), 1)
         }, 'Monthly attendance report retrieved');
+        
     } catch (error) {
         logger.error('Get monthly attendance report error:', error);
         return errorResponse(res, error.message, 500);

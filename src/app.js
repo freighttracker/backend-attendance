@@ -76,6 +76,7 @@ app.use(morgan('combined', { stream: { write: message => logger.info(message.tri
 
 // Static files
 app.use('/uploads', express.static('uploads'));
+app.use('/admin', express.static('public/admin'));
 
 // Health check
 app.get('/health', (req, res) => {

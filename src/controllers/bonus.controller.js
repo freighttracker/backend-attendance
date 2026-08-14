@@ -6,7 +6,7 @@ const { logger } = require('../utils/logger');
 // @route   POST /api/payroll/bonuses
 // @access  Private/Admin
 exports.createBonus = async (req, res) => {
-    
+
     try {
         const { userId, bonusType, amount, month, year, description } = req.body;
         if (!userId || !bonusType || !amount || !month || !year) {
@@ -71,7 +71,6 @@ exports.getMyBonuses = async (req, res) => {
 
 };
 
-
 // @desc    Approve a bonus
 // @route   PUT /api/payroll/bonuses/:id/approve
 // @access  Private/Admin
@@ -108,11 +107,11 @@ exports.rejectBonus = async (req, res) => {
         return errorResponse(res, error.message, 500);
     }
 };
-
 // @desc    Delete a bonus (only if not yet applied to a salary slip)
 // @route   DELETE /api/payroll/bonuses/:id
 // @access  Private/Admin
 exports.deleteBonus = async (req, res) => {
+
     try {
         const bonus = await Bonus.findById(req.params.id);
         if (!bonus) return errorResponse(res, 'Bonus not found', 404);

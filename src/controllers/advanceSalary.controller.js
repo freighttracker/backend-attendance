@@ -3,6 +3,7 @@ const { successResponse, errorResponse, paginatedResponse } = require('../utils/
 const { logger } = require('../utils/logger');
 
 // @desc    Request/create a salary advance
+
 // @route   POST /api/payroll/advances
 // @access  Private (self) / Private/Admin (on behalf of an employee)
 exports.createAdvance = async (req, res) => {

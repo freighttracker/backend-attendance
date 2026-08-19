@@ -54,9 +54,9 @@ exports.getBonuses = async (req, res) => {
         logger.error('Get bonuses error:', error);
         return errorResponse(res, error.message, 500);
     }
-};
+}; 
 
-// @desc    Get my bonuses
+// @desc    Get my bonuses 
 // @route   GET /api/payroll/bonuses/my
 // @access  Private
 exports.getMyBonuses = async (req, res) => {
@@ -107,6 +107,7 @@ exports.rejectBonus = async (req, res) => {
         return errorResponse(res, error.message, 500);
     }
 };
+
 // @desc    Delete a bonus (only if not yet applied to a salary slip)
 // @route   DELETE /api/payroll/bonuses/:id
 // @access  Private/Admin

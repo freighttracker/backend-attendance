@@ -8,9 +8,16 @@ const { logger } = require('../utils/logger');
 // @access  Private
 exports.createReimbursement = async (req, res) => {
     try {
+
         const { category, amount, description, expenseDate, userId } = req.body;
-        if (!category || !amount || !expenseDate) {
-            return errorResponse(res, 'category, amount and expenseDate are required', 400);
+        
+        const missing = [
+            !category && 'category',
+            !amount && 'amount',
+            !expenseDate && 'expenseDate'
+        ].filter(Boolean);
+        if (missing.length) {
+            return errorResponse(res, `${missing.join(', ')} ${missing.length > 1 ? 'are' : 'is'} required`, 400);
         }
 
         // Admins may file a reimbursement on behalf of an employee; otherwise it's always self.

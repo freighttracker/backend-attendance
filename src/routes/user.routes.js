@@ -1,13 +1,18 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/user.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
+const { attachScope } = require('../middleware/scope.middleware');
 const upload = require('../middleware/upload.middleware');
 
+// Any admin tier can reach these routes; attachScope + the controller then
+// narrow what each tier actually sees/can touch.
+const anyAdmin = authorize('superadmin', 'admin', 'company_admin', 'subcompany_admin');
+
 // Admin routes
-router.get('/', authenticate, authorize('admin'), userController.getAllUsers);
-router.post('/', authenticate, authorize('admin'), userController.createUser);
-router.post('/bulk-upload', authenticate, authorize('admin'), upload.single('file'), userController.bulkUpload);
+router.get('/', authenticate, anyAdmin, attachScope, userController.getAllUsers);
+router.post('/', authenticate, anyAdmin, attachScope, userController.createUser);
+router.post('/bulk-upload', authenticate, authorize('superadmin', 'admin'), upload.single('file'), userController.bulkUpload);
 router.get('/departments/list', authenticate, userController.getDepartments);
 
 // Profile routes
@@ -16,8 +21,8 @@ router.put('/profile/me', authenticate, userController.updateMyProfile);
 router.post('/avatar', authenticate, upload.single('avatar'), userController.uploadAvatar);
 
 // Single user routes
-router.get('/:id', authenticate, userController.getUser);
-router.put('/:id', authenticate, authorize('admin'), userController.updateUser);
-router.delete('/:id', authenticate, authorize('admin'), userController.deleteUser);
+router.get('/:id', authenticate, attachScope, userController.getUser);
+router.put('/:id', authenticate, anyAdmin, attachScope, userController.updateUser);
+router.delete('/:id', authenticate, anyAdmin, attachScope, userController.deleteUser);
 
 module.exports = router;

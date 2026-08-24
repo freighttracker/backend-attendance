@@ -24,6 +24,8 @@ const reportRoutes = require('./routes/report.routes');
 const settingRoutes = require('./routes/setting.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
+const companyRoutes = require('./routes/company.routes');
+const subCompanyRoutes = require('./routes/subCompany.routes');
 
 const { errorHandler } = require('./middleware/error.middleware');
 const { logger } = require('./utils/logger');
@@ -104,6 +106,8 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/settings', settingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/companies', companyRoutes);
+app.use('/api/subcompanies', subCompanyRoutes);
 
 // 404 handler
 app.use((req, res) => {

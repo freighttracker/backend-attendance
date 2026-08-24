@@ -1,6 +1,8 @@
 const User = require('../models/User');
+const SubCompany = require('../models/SubCompany');
 const LeaveBalance = require('../models/LeaveBalance');
 const LeaveType = require('../models/LeaveType');
+const { scopeFilter, canAccessUser } = require('../middleware/scope.middleware');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 const xlsx = require('xlsx');
@@ -24,7 +26,10 @@ function normalizeSalaryPayload(body) {
 exports.getAllUsers = async (req, res) => {
     try {
         const { page = 1, limit = 10, search, department, role, isActive } = req.query;
-        const query = {};
+        // req.scope is set by attachScope from the caller's OWN user record -
+        // a company_admin/subcompany_admin can never see past it regardless
+        // of what's in the query string.
+        const query = { ...scopeFilter(req) };
 
         if (search) {
             query.$or = [
@@ -68,6 +73,10 @@ exports.getUser = async (req, res) => {
         if (!user) {
             return errorResponse(res, 'User not found', 404);
         }
+        // Always allowed to view your own record; otherwise must be in scope.
+        if (req.user.id !== String(user._id) && req.scope && !canAccessUser(req, user)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
         return successResponse(res, user, 'User retrieved successfully');
     } catch (error) {
         logger.error('Get user error:', error);
@@ -81,6 +90,19 @@ exports.getUser = async (req, res) => {
 exports.createUser = async (req, res) => {
     try {
         const userData = normalizeSalaryPayload(req.body);
+
+        // A company_admin/subcompany_admin can only ever create a user inside
+        // their own scope, no matter what company/subCompany was submitted.
+        if (req.scope && !req.scope.isSuperAdmin) {
+            if (!req.scope.companyId) return errorResponse(res, 'You are not assigned to a company', 403);
+            userData.company = req.scope.companyId;
+            userData.subCompany = req.scope.subCompanyId || userData.subCompany || null;
+            if (userData.subCompany) {
+                const belongs = await SubCompany.exists({ _id: userData.subCompany, company: req.scope.companyId });
+                if (!belongs) return errorResponse(res, 'That subcompany does not belong to your company', 400);
+            }
+        }
+
         const existingUser = await User.findOne({
             $or: [{ email: userData.email }, { employeeCode: userData.employeeCode }]
         });
@@ -120,19 +142,31 @@ exports.createUser = async (req, res) => {
 // @access  Private/Admin
 exports.updateUser = async (req, res) => {
     try {
+        const existing = await User.findById(req.params.id);
+        if (!existing) {
+            return errorResponse(res, 'User not found', 404);
+        }
+        if (req.scope && !req.scope.isSuperAdmin && !canAccessUser(req, existing)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+
         const updates = normalizeSalaryPayload(req.body);
         delete updates.password; // Don't update password through this route
         delete updates.refreshToken;
+
+        // A scoped admin can never move a user OUT of their own company/
+        // subcompany by editing these fields, and can't grant themselves a
+        // wider scope than their own.
+        if (req.scope && !req.scope.isSuperAdmin) {
+            delete updates.company;
+            delete updates.subCompany;
+        }
 
         const user = await User.findByIdAndUpdate(
             req.params.id,
             updates,
             { new: true, runValidators: true }
         ).select('-password -refreshToken');
-
-        if (!user) {
-            return errorResponse(res, 'User not found', 404);
-        }
 
         logger.info(`User updated: ${user.email} by ${req.user.email}`);
         return successResponse(res, user, 'Employee updated successfully');
@@ -147,15 +181,19 @@ exports.updateUser = async (req, res) => {
 // @access  Private/Admin
 exports.deleteUser = async (req, res) => {
     try {
+        const existing = await User.findById(req.params.id);
+        if (!existing) {
+            return errorResponse(res, 'User not found', 404);
+        }
+        if (req.scope && !req.scope.isSuperAdmin && !canAccessUser(req, existing)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+
         const user = await User.findByIdAndUpdate(
             req.params.id,
             { isActive: false },
             { new: true }
         );
-
-        if (!user) {
-            return errorResponse(res, 'User not found', 404);
-        }
 
         logger.info(`User deactivated: ${user.email} by ${req.user.email}`);
         return successResponse(res, null, 'Employee deactivated successfully');

@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const { body } = require('express-validator');
 const leaveController = require('../controllers/leave.controller');
@@ -25,12 +25,12 @@ router.get('/balance', authenticate, leaveController.getLeaveBalance);
 router.put('/:id/cancel', authenticate, leaveController.cancelLeave);
 
 // Admin routes
-router.get('/all', authenticate, authorize('admin'), leaveController.getAllLeaves);
-router.get('/stats', authenticate, authorize('admin'), leaveController.getLeaveStats);
+router.get('/all', authenticate, authorize('superadmin', 'admin'), leaveController.getAllLeaves);
+router.get('/stats', authenticate, authorize('superadmin', 'admin'), leaveController.getLeaveStats);
 router.post(
     '/balances',
     authenticate,
-    authorize('admin'),
+    authorize('superadmin', 'admin'),
     [
         body('userId').notEmpty().withMessage('Employee is required'),
         body('leaveTypeId').notEmpty().withMessage('Leave type is required'),
@@ -42,7 +42,7 @@ router.post(
 router.put(
     '/:id/status',
     authenticate,
-    authorize('admin'),
+    authorize('superadmin', 'admin'),
     [
         body('status').isIn(['approved', 'rejected']).withMessage('Status must be approved or rejected'),
         body('paidStatus')
@@ -61,12 +61,12 @@ router.put(
     validate,
     leaveController.updateLeaveStatus
 );
-router.put('/:id', authenticate, authorize('admin'), leaveController.updateLeaveRequest);
+router.put('/:id', authenticate, authorize('superadmin', 'admin'), leaveController.updateLeaveRequest);
 
 // Leave types
 router.get('/types', authenticate, leaveController.getLeaveTypes);
-router.post('/types', authenticate, authorize('admin'), leaveController.createLeaveType);
-router.put('/types/:id', authenticate, authorize('admin'), leaveController.updateLeaveType);
-router.delete('/types/:id', authenticate, authorize('admin'), leaveController.deleteLeaveType);
+router.post('/types', authenticate, authorize('superadmin', 'admin'), leaveController.createLeaveType);
+router.put('/types/:id', authenticate, authorize('superadmin', 'admin'), leaveController.updateLeaveType);
+router.delete('/types/:id', authenticate, authorize('superadmin', 'admin'), leaveController.deleteLeaveType);
 
 module.exports = router;

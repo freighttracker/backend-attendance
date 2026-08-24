@@ -134,7 +134,9 @@ exports.login = async (req, res) => {
                 role: user.role,
                 department: user.department,
                 designation: user.designation,
-                avatarUrl: user.avatarUrl
+                avatarUrl: user.avatarUrl,
+                company: user.company,
+                subCompany: user.subCompany
             }
         }, 'Login successful');
     } catch (error) {

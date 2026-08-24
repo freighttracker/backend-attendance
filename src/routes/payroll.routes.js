@@ -1,9 +1,9 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const payrollController = require('../controllers/payroll.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
 
-router.use(authenticate, authorize('admin'));
+router.use(authenticate, authorize('superadmin', 'admin'));
 
 router.get('/dashboard', payrollController.getPayrollDashboard);
 

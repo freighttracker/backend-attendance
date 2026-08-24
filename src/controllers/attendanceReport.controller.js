@@ -81,6 +81,7 @@ async function buildEmployeeRow(user, month, year, todayStatus) {
 }
 
 function buildSummary(rows) {
+    
     const totalEmployees = rows.length;
     const sum = (key) => round2(rows.reduce((acc, r) => acc + (r[key] || 0), 0));
     const workingDays = rows[0]?.workingDays || 0;

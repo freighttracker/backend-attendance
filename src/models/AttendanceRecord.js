@@ -6,6 +6,19 @@ const attendanceRecordSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    // Stamped from the checking-in user's own record at check-in time (never
+    // trust a client-supplied company/subCompany) so records can be scoped
+    // without a join back through User for every query.
+    company: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        default: null
+    },
+    subCompany: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'SubCompany',
+        default: null
+    },
     date: {
         type: Date,
         required: true
@@ -149,5 +162,7 @@ attendanceRecordSchema.index({ user: 1, date: 1 }, { unique: true });
 attendanceRecordSchema.index({ date: 1 });
 attendanceRecordSchema.index({ status: 1 });
 attendanceRecordSchema.index({ isLocked: 1 });
+attendanceRecordSchema.index({ company: 1 });
+attendanceRecordSchema.index({ subCompany: 1 });
 
 module.exports = mongoose.model('AttendanceRecord', attendanceRecordSchema);

@@ -456,6 +456,8 @@ const calculateSalary = async (userId, month, year) => {
 
     return {
         user: userId,
+        company: user.company || null,
+        subCompany: user.subCompany || null,
         month,
         year,
         employeeSnapshot: {

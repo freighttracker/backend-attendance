@@ -71,6 +71,19 @@ const salaryStructureSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
+    // Stamped from the target user's own company/subCompany at creation
+    // time (never from the request body) so structures can be scoped
+    // without a join back through User for every query.
+    company: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        default: null
+    },
+    subCompany: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'SubCompany',
+        default: null
+    },
     monthlyGrossSalary: {
         type: Number,
         required: [true, 'Monthly gross salary is required'],
@@ -108,5 +121,7 @@ const salaryStructureSchema = new mongoose.Schema({
 
 salaryStructureSchema.index({ user: 1 });
 salaryStructureSchema.index({ isActive: 1 });
+salaryStructureSchema.index({ company: 1 });
+salaryStructureSchema.index({ subCompany: 1 });
 
 module.exports = mongoose.model('SalaryStructure', salaryStructureSchema);

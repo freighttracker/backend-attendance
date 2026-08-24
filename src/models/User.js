@@ -40,10 +40,26 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: null
     },
+    // 'admin' is kept as a legacy full-access role so every existing account
+    // and every existing authorize('admin') route check keeps working exactly
+    // as before. 'superadmin' is the new name going forward and is treated as
+    // fully equivalent to 'admin' everywhere (see middleware/scope.middleware.js).
     role: {
         type: String,
-        enum: ['admin', 'employee', 'manager'],
+        enum: ['superadmin', 'company_admin', 'subcompany_admin', 'admin', 'employee', 'manager'],
         default: 'employee'
+    },
+    // Company/subcompany hierarchy. Null for legacy users and for
+    // superadmin/admin accounts, which are not scoped to any one company.
+    company: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        default: null
+    },
+    subCompany: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'SubCompany',
+        default: null
     },
     department: {
         type: String,
@@ -172,6 +188,8 @@ userSchema.index({ email: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ department: 1 });
 userSchema.index({ isActive: 1 });
+userSchema.index({ company: 1 });
+userSchema.index({ subCompany: 1 });
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {

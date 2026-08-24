@@ -51,6 +51,10 @@ const SLIP_FIELDS = [
     'totalEarnings', 'totalDeductions', 'totalBonus', 'totalReimbursement', 'netSalary'
 ];
 
+// company/subCompany are stamped once at creation (an employee's tenant
+// never changes mid-history) so they're deliberately NOT in SLIP_FIELDS -
+// regenerating an existing slip must never overwrite them.
+
 // Creates a brand new slip, or - if one already exists for this user/month/year
 // and isn't locked/published/paid - transparently recomputes it in place.
 // All DB writes happen inside the caller-supplied session so a bulk run
@@ -81,6 +85,8 @@ const generateSlipForUser = async (userId, month, year, actorId, session) => {
     } else {
         const created = await SalarySlip.create([{
             user: userId,
+            company: salaryData.company,
+            subCompany: salaryData.subCompany,
             month,
             year,
             ...SLIP_FIELDS.reduce((acc, f) => ({ ...acc, [f]: salaryData[f] }), {}),

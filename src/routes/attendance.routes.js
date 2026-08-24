@@ -1,8 +1,9 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const attendanceController = require('../controllers/attendance.controller');
 const attendanceReportController = require('../controllers/attendanceReport.controller');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
+const { attachScope } = require('../middleware/scope.middleware');
 
 // Employee routes
 router.post('/check-in', authenticate, attendanceController.checkIn);
@@ -16,19 +17,19 @@ router.get('/monthly-summary', authenticate, attendanceReportController.getMyMon
 router.get('/employee/:id', authenticate, attendanceController.getEmployeeAttendance);
 
 // Admin routes
-router.get('/all', authenticate, authorize('admin'), attendanceController.getAllAttendance);
-router.get('/corrections', authenticate, authorize('admin'), attendanceController.getCorrectionRequests);
-router.put('/corrections/:id', authenticate, authorize('admin'), attendanceController.handleCorrectionRequest);
-router.put('/correct', authenticate, authorize('admin'), attendanceController.correctAttendanceRecord);
-router.post('/lock', authenticate, authorize('admin'), attendanceController.lockAttendance);
-router.get('/report', authenticate, authorize('admin'), attendanceReportController.getMonthlyReport);
-router.get('/settings', authenticate, authorize('admin'), attendanceController.getAttendanceSettings);
-router.put('/settings', authenticate, authorize('admin'), attendanceController.updateAttendanceSettings);
+router.get('/all', authenticate, authorize('superadmin', 'admin', 'company_admin', 'subcompany_admin'), attachScope, attendanceController.getAllAttendance);
+router.get('/corrections', authenticate, authorize('superadmin', 'admin'), attendanceController.getCorrectionRequests);
+router.put('/corrections/:id', authenticate, authorize('superadmin', 'admin'), attendanceController.handleCorrectionRequest);
+router.put('/correct', authenticate, authorize('superadmin', 'admin'), attendanceController.correctAttendanceRecord);
+router.post('/lock', authenticate, authorize('superadmin', 'admin'), attendanceController.lockAttendance);
+router.get('/report', authenticate, authorize('superadmin', 'admin'), attendanceReportController.getMonthlyReport);
+router.get('/settings', authenticate, authorize('superadmin', 'admin'), attendanceController.getAttendanceSettings);
+router.put('/settings', authenticate, authorize('superadmin', 'admin'), attendanceController.updateAttendanceSettings);
 
 // Monthly attendance report module
-router.get('/report/monthly', authenticate, authorize('admin'), attendanceReportController.getMonthlyReport);
+router.get('/report/monthly', authenticate, authorize('superadmin', 'admin'), attendanceReportController.getMonthlyReport);
 router.get('/report/employee/:id', authenticate, attendanceReportController.getEmployeeReport);
 router.get('/calendar/:id', authenticate, attendanceReportController.getAttendanceCalendar);
-router.get('/dashboard', authenticate, authorize('admin'), attendanceReportController.getAttendanceDashboard);
+router.get('/dashboard', authenticate, authorize('superadmin', 'admin'), attendanceReportController.getAttendanceDashboard);
 
 module.exports = router;

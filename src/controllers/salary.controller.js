@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const SalarySlip = require('../models/SalarySlip');
+const { scopeFilter, SUPERADMIN_ROLES } = require('../middleware/scope.middleware');
 const { runGenerateForUser } = require('./payroll.controller');
 const { generateSalarySlipPDF } = require('../services/pdf.service');
 const { sendSalarySlipEmail } = require('../services/email.service');
@@ -46,7 +47,7 @@ exports.getAllSalarySlips = async (req, res) => {
     try {
         const { page = 1, limit = 20, userId, month, year, status } = req.query;
 
-        const query = {};
+        const query = { ...scopeFilter(req) };
         if (userId) query.user = userId;
         if (month) query.month = parseInt(month);
         if (year) query.year = parseInt(year);
@@ -78,10 +79,11 @@ exports.getAllSalarySlips = async (req, res) => {
 // @access  Private
 exports.getSalarySlip = async (req, res) => {
     try {
+
         const slip = await SalarySlip.findById(req.params.id).populate('user', 'firstName lastName employeeCode department designation');
         if (!slip) return errorResponse(res, 'Salary slip not found', 404);
 
-        if (req.user.role !== 'admin' && slip.user._id.toString() !== req.user.id) {
+        if (!SUPERADMIN_ROLES.includes(req.user.role) && slip.user._id.toString() !== req.user.id) {
             return errorResponse(res, 'Not authorized', 403);
         }
 
@@ -136,6 +138,7 @@ exports.approveSalarySlip = async (req, res) => {
 // @route   PUT /api/salary/:id/reject
 // @access  Private/Admin
 exports.rejectSalarySlip = async (req, res) => {
+
     try {
         const { reason } = req.body;
         const slip = await SalarySlip.findById(req.params.id);
@@ -161,6 +164,7 @@ exports.rejectSalarySlip = async (req, res) => {
 // @access  Private/Admin
 exports.publishSalarySlip = async (req, res) => {
     try {
+
         const slip = await SalarySlip.findById(req.params.id);
         if (!slip) return errorResponse(res, 'Salary slip not found', 404);
         if (slip.status !== 'approved') return errorResponse(res, 'Salary slip must be approved before it can be published', 400);
@@ -173,6 +177,7 @@ exports.publishSalarySlip = async (req, res) => {
 
         logger.info(`Salary slip published: ${slip._id} by ${req.user.email}`);
         return successResponse(res, slip, 'Salary slip published');
+        
     } catch (error) {
         logger.error('Publish salary slip error:', error);
         return errorResponse(res, error.message, 500);

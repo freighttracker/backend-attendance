@@ -1,18 +1,24 @@
 const moment = require('moment-timezone');
 const SalaryStructure = require('../models/SalaryStructure');
 const User = require('../models/User');
+const { scopeFilter, canAccessUser, SUPERADMIN_ROLES } = require('../middleware/scope.middleware');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 
     // @desc    Get an employee's current salary structure
     // @route   GET /api/payroll/structure/:userId
-    // @access  Private (self) / Private/Admin (any)
+    // @access  Private (self) / Private/Admin (any in scope)
     exports.getSalaryStructure = async (req, res) => {
 
         try {
             const { userId } = req.params;
-            if (req.user.role !== 'admin' && req.user.id !== userId) {
-                return errorResponse(res, 'Not authorized', 403);
+            if (req.user.id !== userId) {
+                if (!SUPERADMIN_ROLES.includes(req.user.role)) {
+                    const targetUser = await User.findById(userId).select('company subCompany');
+                    if (!targetUser || !canAccessUser(req, targetUser)) {
+                        return errorResponse(res, 'Not authorized', 403);
+                    }
+                }
             }
 
             const structure = await SalaryStructure.findOne({ user: userId })
@@ -29,11 +35,13 @@ const { logger } = require('../utils/logger');
 
     // @desc    List all salary structures
     // @route   GET /api/payroll/structures
-    // @access  Private/Admin
+    // @access  Private/Admin (own scope only, unless superadmin)
     exports.listSalaryStructures = async (req, res) => {
         try {
             const { page = 1, limit = 20, department } = req.query;
-            const userQuery = { isActive: true };
+            // req.scope pins this to the caller's own company/subcompany unless
+            // they're a superadmin (who may still narrow via ?companyId=).
+            const userQuery = { isActive: true, ...scopeFilter(req) };
             if (department) userQuery.department = department;
 
             const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -71,8 +79,12 @@ const { logger } = require('../utils/logger');
             const { monthlyGrossSalary, annualCTC, effectiveFrom, earnings, deductions, overtime, remarks } = req.body;
 
             const user = await User.findById(userId);
-            
+
             if (!user) return errorResponse(res, 'Employee not found', 404);
+
+            if (!SUPERADMIN_ROLES.includes(req.user.role) && !canAccessUser(req, user)) {
+                return errorResponse(res, 'Not authorized to manage this employee\'s salary structure', 403);
+            }
 
             let structure = await SalaryStructure.findOne({ user: userId });
 
@@ -84,6 +96,11 @@ const { logger } = require('../utils/logger');
 
                 structure = await SalaryStructure.create({
                     user: userId,
+                    // Always taken from the employee's own record, never the
+                    // request body - a structure can never be filed under a
+                    // different company than the employee it belongs to.
+                    company: user.company || null,
+                    subCompany: user.subCompany || null,
                     monthlyGrossSalary,
                     annualCTC,
                     effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : new Date(),
@@ -142,8 +159,11 @@ const { logger } = require('../utils/logger');
         try {
             
             const { userId } = req.params;
-            if (req.user.role !== 'admin' && req.user.id !== userId) {
-                return errorResponse(res, 'Not authorized', 403);
+            if (req.user.id !== userId && !SUPERADMIN_ROLES.includes(req.user.role)) {
+                const targetUser = await User.findById(userId).select('company subCompany');
+                if (!targetUser || !canAccessUser(req, targetUser)) {
+                    return errorResponse(res, 'Not authorized', 403);
+                }
             }
 
             const structure = await SalaryStructure.findOne({ user: userId })

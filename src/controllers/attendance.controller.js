@@ -8,6 +8,7 @@ const Holiday = require('../models/Holiday');
 const LeaveRequest = require('../models/LeaveRequest');
 const AttendanceCorrectionRequest = require('../models/AttendanceCorrectionRequest');
 const Notification = require('../models/Notification');
+const { scopeFilter } = require('../middleware/scope.middleware');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 
@@ -232,7 +233,12 @@ exports.checkIn = async (req, res) => {
             attendance = new AttendanceRecord({
                 user: userId,
                 date: today,
-                status: 'present'
+                status: 'present',
+                // Stamped from the checking-in user's own record, never from
+                // the request body, so a record can never be filed under a
+                // company/subcompany other than the employee's own.
+                company: req.user.company || null,
+                subCompany: req.user.subCompany || null
             });
         }
 
@@ -367,7 +373,10 @@ exports.getAllAttendance = async (req, res) => {
     try {
         const { page = 1, limit = 50, userId, startDate, endDate, status } = req.query;
 
-        const query = {};
+        // req.scope pins this to the caller's own company/subcompany unless
+        // they're a superadmin - a company_admin/subcompany_admin can never
+        // list another tenant's attendance regardless of query params.
+        const query = { ...scopeFilter(req) };
         if (userId) query.user = userId;
         if (status) query.status = status;
         if (startDate && endDate) {

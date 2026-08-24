@@ -23,6 +23,17 @@ const salarySlipSchema = new mongoose.Schema({
         ref: 'User',
         required: true
     },
+    // Stamped from the employee's own company/subCompany at generation time.
+    company: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        default: null
+    },
+    subCompany: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'SubCompany',
+        default: null
+    },
     payroll: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Payroll',
@@ -136,5 +147,7 @@ salarySlipSchema.index({ user: 1 });
 salarySlipSchema.index({ month: 1, year: 1 });
 salarySlipSchema.index({ status: 1 });
 salarySlipSchema.index({ payroll: 1 });
+salarySlipSchema.index({ company: 1 });
+salarySlipSchema.index({ subCompany: 1 });
 
 module.exports = mongoose.model('SalarySlip', salarySlipSchema);

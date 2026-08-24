@@ -1,4 +1,6 @@
 const User = require('./User');
+const Company = require('./Company');
+const SubCompany = require('./SubCompany');
 const AttendanceRule = require('./AttendanceRule');
 const EmployeeRule = require('./EmployeeRule');
 const AttendanceRecord = require('./AttendanceRecord');
@@ -22,6 +24,8 @@ const AttendanceCorrectionRequest = require('./AttendanceCorrectionRequest');
 
 module.exports = {
     User,
+    Company,
+    SubCompany,
     AttendanceRule,
     EmployeeRule,
     AttendanceRecord,

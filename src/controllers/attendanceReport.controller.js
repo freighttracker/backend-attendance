@@ -7,10 +7,12 @@ const WeekendConfig = require('../models/WeekendConfig');
 const SalarySlip = require('../models/SalarySlip');
 const SalaryStructure = require('../models/SalaryStructure');
 const { getMonthlyAttendanceSummary, computeSalaryDays, round2 } = require('../services/payroll.service');
+const { scopeFilter, canAccessUser } = require('../middleware/scope.middleware');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 
 const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
+const ADMIN_TIER_ROLES = ['superadmin', 'admin', 'company_admin', 'subcompany_admin'];
 
 function fullName(user) {
     return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.employeeCode;
@@ -26,6 +28,7 @@ async function getTodayStatusMap(userIds) {  }
 // month's salary-day count when no slip has been generated yet. `salarySource`
 // tells the frontend which one it's looking at so it can label it honestly.
 async function resolveSalaryFigures(userId, month, year, daysInMonth, salaryDays) {
+    
     const [slip, structure] = await Promise.all([
         SalarySlip.findOne({ user: userId, month, year }),
         SalaryStructure.findOne({ user: userId, isActive: true })
@@ -121,7 +124,7 @@ exports.getMonthlyReport = async (req, res) => {
         const page = Math.max(parseInt(req.query.page) || 1, 1);
         const limit = Math.max(parseInt(req.query.limit) || 20, 1);
 
-        const userFilter = { role: { $ne: 'admin' } };
+        const userFilter = { role: { $ne: 'admin' }, ...scopeFilter(req) };
         if (department) userFilter.department = department;
         if (designation) userFilter.designation = designation;
         if (userId) userFilter._id = userId;
@@ -168,12 +171,17 @@ exports.getMonthlyReport = async (req, res) => {
 exports.getEmployeeReport = async (req, res) => {
     try {
         const { id } = req.params;
-        if (req.user.role !== 'admin' && req.user.id !== id) {
+        const isAdminTier = ADMIN_TIER_ROLES.includes(req.user.role);
+        if (!isAdminTier && req.user.id !== id) {
             return errorResponse(res, 'Not authorized', 403);
         }
 
-        const user = await User.findById(id).select('firstName lastName employeeCode department designation');
+        const user = await User.findById(id).select('firstName lastName employeeCode department designation company subCompany');
         if (!user) return errorResponse(res, 'Employee not found', 404);
+
+        if (isAdminTier && req.user.id !== id && req.scope && !canAccessUser(req, user)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
 
         const now = moment.tz(TZ);
         const month = parseInt(req.query.month) || (now.month() + 1);
@@ -236,12 +244,17 @@ exports.getMyMonthlySummary = (req, res) => {
 exports.getAttendanceCalendar = async (req, res) => {
     try {
         const { id } = req.params;
-        if (req.user.role !== 'admin' && req.user.id !== id) {
+        const isAdminTier = ADMIN_TIER_ROLES.includes(req.user.role);
+        if (!isAdminTier && req.user.id !== id) {
             return errorResponse(res, 'Not authorized', 403);
         }
 
-        const user = await User.findById(id).select('firstName lastName employeeCode department designation');
+        const user = await User.findById(id).select('firstName lastName employeeCode department designation company subCompany');
         if (!user) return errorResponse(res, 'Employee not found', 404);
+
+        if (isAdminTier && req.user.id !== id && req.scope && !canAccessUser(req, user)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
 
         const now = moment.tz(TZ);
         const month = parseInt(req.query.month) || (now.month() + 1);
@@ -371,7 +384,7 @@ exports.getAttendanceDashboard = async (req, res) => {
         const month = parseInt(req.query.month) || (now.month() + 1);
         const year = parseInt(req.query.year) || now.year();
 
-        const employees = await User.find({ role: { $ne: 'admin' } }).select('_id');
+        const employees = await User.find({ role: { $ne: 'admin' }, ...scopeFilter(req) }).select('_id');
         const totalEmployees = employees.length;
         const employeeIds = employees.map((e) => e._id);
 

@@ -30,7 +30,7 @@ exports.register = async (req, res) => {
 
         // Check if user already exists
         const existingUser = await User.findOne({
-            $or: [{ email }, { employeeCode }]
+            $or: [{ email: email.trim().toLowerCase() }, { employeeCode }]
         });
 
         if (existingUser) {
@@ -84,7 +84,7 @@ exports.login = async (req, res) => {
             return errorResponse(res, 'Please provide email and password', 400);
         }
 
-        const user = await User.findOne({ email }).select('+password');
+        const user = await User.findOne({ email: email.trim().toLowerCase() }).select('+password');
 
         if (!user) {
             return errorResponse(res, 'Invalid credentials', 401);
@@ -204,6 +204,7 @@ exports.updatePassword = async (req, res) => {
         const user = await User.findById(req.user.id).select('+password');
 
         const isMatch = await user.comparePassword(currentPassword);
+
         if (!isMatch) {
             return errorResponse(res, 'Current password is incorrect', 400);
         }
@@ -222,6 +223,7 @@ exports.updatePassword = async (req, res) => {
 // @route   POST /api/auth/logout
 // @access  Private
 exports.logout = async (req, res) => {
+
     try {
         await User.findByIdAndUpdate(req.user.id, { $unset: { refreshToken: 1 } });
         return successResponse(res, null, 'Logged out successfully');
@@ -229,4 +231,5 @@ exports.logout = async (req, res) => {
         logger.error('Logout error:', error);
         return errorResponse(res, error.message, 500);
     }
+    
 };

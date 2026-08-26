@@ -17,6 +17,7 @@ const { User } = require('../../models');
 //     it after first login).
 //   - Idempotent: running it again when the account is already a
 //     superadmin just confirms that and exits.
+
 const SUPERADMIN_EMAIL = process.env.SUPERADMIN_EMAIL || 'yashtrandinginc@gmail.com';
 const SUPERADMIN_PASSWORD = process.env.SUPERADMIN_PASSWORD;
 const SUPERADMIN_FIRST_NAME = process.env.SUPERADMIN_FIRST_NAME || 'Super';
@@ -33,6 +34,7 @@ const run = async () => {
 
     if (user) {
         if (user.role === 'superadmin') {
+            
             console.log(`${user.email} is already a superadmin - nothing to do.`);
             return { user, created: false, passwordShown: null };
         }

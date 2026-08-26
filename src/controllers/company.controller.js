@@ -82,16 +82,34 @@ exports.getCompany = async (req, res) => {
     }
 };
 
-// @desc    Create a company
+// @desc    Create a company, along with its first Company Admin login so the
+//          company is immediately usable instead of being an empty shell
+//          nobody can sign in to.
 // @route   POST /api/companies
 // @access  Private/SuperAdmin
 exports.createCompany = async (req, res) => {
     try {
-        const { name, code, email, phone, address, city, state, country, taxNumber, website, contactPerson } = req.body;
+        const {
+            name, code, email, phone, address, city, state, country, taxNumber, website, contactPerson,
+            adminFirstName, adminLastName, adminEmail, adminPassword, adminPhone
+        } = req.body;
         if (!name || !code) return errorResponse(res, 'Company name and code are required', 400);
+        if (!adminFirstName || !adminLastName || !adminEmail || !adminPassword) {
+            return errorResponse(res, 'Admin first name, last name, email and password are required to create the company\'s first login', 400);
+        }
+        if (adminPassword.length < 6) {
+            return errorResponse(res, 'Admin password must be at least 6 characters', 400);
+        }
 
-        const existing = await Company.findOne({ code: code.trim().toUpperCase() });
-        if (existing) return errorResponse(res, 'A company with this code already exists', 409);
+        const normalizedCode = code.trim().toUpperCase();
+        const existingCompany = await Company.findOne({ code: normalizedCode });
+        if (existingCompany) return errorResponse(res, 'A company with this code already exists', 409);
+
+        const adminEmployeeCode = `${normalizedCode}-ADMIN`;
+        const existingUser = await User.findOne({
+            $or: [{ email: adminEmail.trim().toLowerCase() }, { employeeCode: adminEmployeeCode }]
+        });
+        if (existingUser) return errorResponse(res, 'A user with this admin email already exists', 409);
 
         const company = await Company.create({
             name, code, email, phone, address, city, state, country, taxNumber, website, contactPerson,
@@ -99,9 +117,30 @@ exports.createCompany = async (req, res) => {
             updatedBy: req.user.id
         });
 
+        let admin;
+        try {
+            admin = await User.create({
+                employeeCode: adminEmployeeCode,
+                email: adminEmail,
+                password: adminPassword,
+                firstName: adminFirstName,
+                lastName: adminLastName,
+                phone: adminPhone,
+                role: 'company_admin',
+                company: company._id
+            });
+        } catch (adminError) {
+            // Don't leave a company behind with no way to sign into it.
+            await Company.deleteOne({ _id: company._id });
+            throw adminError;
+        }
+
         logAudit(req, 'create', company._id, null, company.toObject());
-        logger.info(`Company created: ${company.code} by ${req.user.email}`);
-        return successResponse(res, company, 'Company created successfully', 201);
+        logger.info(`Company created: ${company.code} by ${req.user.email} (admin: ${admin.email})`);
+        return successResponse(res, {
+            ...company.toObject(),
+            admin: { id: admin._id, email: admin.email, employeeCode: admin.employeeCode }
+        }, 'Company created successfully', 201);
     } catch (error) {
         logger.error('Create company error:', error);
         return errorResponse(res, error.message, 500);

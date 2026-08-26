@@ -424,6 +424,7 @@ exports.adjustLeaveBalance = async (req, res) => {
 // @route   PUT /api/leaves/:id
 // @access  Private/Admin
 exports.updateLeaveRequest = async (req, res) => {
+
     try {
         const { leaveTypeId, startDate, endDate, remarks } = req.body;
 
@@ -511,6 +512,7 @@ exports.updateLeaveRequest = async (req, res) => {
         logger.error('Update leave request error:', error);
         return errorResponse(res, error.message, 500);
     }
+    
 };
 
 // @desc    Get leave types

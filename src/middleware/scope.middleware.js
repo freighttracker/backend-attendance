@@ -5,10 +5,15 @@
 // actually enforces tenant isolation (frontend filtering alone is not
 // sufficient - see scopeFilter below).
 //
-// 'admin' is the pre-existing, unscoped-everything role and is treated as
-// fully equivalent to the new 'superadmin' role so no existing admin account
-// loses any access.
-const SUPERADMIN_ROLES = ['superadmin', 'admin'];
+// Only 'superadmin' is unscoped platform-wide (creates/manages companies
+// themselves). 'admin' is the pre-existing role, but it always belongs to
+// (at most) one company - once that company is set, an admin is scoped to
+// it exactly like a company_admin, so one company's admin can never see
+// another company's employees/attendance/payroll. An admin with no company
+// assigned yet (legacy accounts predating this feature) falls back to
+// company: null, which only matches other not-yet-assigned records - it
+// does NOT fall through to full access.
+const SUPERADMIN_ROLES = ['superadmin'];
 
 const attachScope = (req, res, next) => {
     const role = req.user.role;
@@ -22,7 +27,7 @@ const attachScope = (req, res, next) => {
             companyId: req.query.companyId || null,
             subCompanyId: req.query.subCompanyId || null
         };
-    } else if (role === 'company_admin') {
+    } else if (role === 'company_admin' || role === 'admin') {
         // Pinned to their own company, covering all of its subcompanies.
         // (Narrowing to one specific subcompany via a validated selector is
         // a follow-up enhancement, not required for isolation to hold.)

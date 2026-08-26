@@ -17,19 +17,23 @@ router.get('/monthly-summary', authenticate, attendanceReportController.getMyMon
 router.get('/employee/:id', authenticate, attendanceController.getEmployeeAttendance);
 
 // Admin routes
-router.get('/all', authenticate, authorize('superadmin', 'admin', 'company_admin', 'subcompany_admin'), attachScope, attendanceController.getAllAttendance);
+const anyAdmin = authorize('superadmin', 'admin', 'company_admin', 'subcompany_admin');
+router.get('/all', authenticate, anyAdmin, attachScope, attendanceController.getAllAttendance);
 router.get('/corrections', authenticate, authorize('superadmin', 'admin'), attendanceController.getCorrectionRequests);
 router.put('/corrections/:id', authenticate, authorize('superadmin', 'admin'), attendanceController.handleCorrectionRequest);
 router.put('/correct', authenticate, authorize('superadmin', 'admin'), attendanceController.correctAttendanceRecord);
 router.post('/lock', authenticate, authorize('superadmin', 'admin'), attendanceController.lockAttendance);
-router.get('/report', authenticate, authorize('superadmin', 'admin'), attendanceReportController.getMonthlyReport);
+router.get('/report', authenticate, anyAdmin, attachScope, attendanceReportController.getMonthlyReport);
 router.get('/settings', authenticate, authorize('superadmin', 'admin'), attendanceController.getAttendanceSettings);
 router.put('/settings', authenticate, authorize('superadmin', 'admin'), attendanceController.updateAttendanceSettings);
 
-// Monthly attendance report module
-router.get('/report/monthly', authenticate, authorize('superadmin', 'admin'), attendanceReportController.getMonthlyReport);
-router.get('/report/employee/:id', authenticate, attendanceReportController.getEmployeeReport);
-router.get('/calendar/:id', authenticate, attendanceReportController.getAttendanceCalendar);
-router.get('/dashboard', authenticate, authorize('superadmin', 'admin'), attendanceReportController.getAttendanceDashboard);
+// Monthly attendance report module - attachScope is applied unconditionally
+// (not gated behind anyAdmin) because getEmployeeReport/getAttendanceCalendar
+// are also reachable by a plain employee viewing their own record, and
+// attachScope just resolves whatever req.scope applies to the caller's role.
+router.get('/report/monthly', authenticate, anyAdmin, attachScope, attendanceReportController.getMonthlyReport);
+router.get('/report/employee/:id', authenticate, attachScope, attendanceReportController.getEmployeeReport);
+router.get('/calendar/:id', authenticate, attachScope, attendanceReportController.getAttendanceCalendar);
+router.get('/dashboard', authenticate, anyAdmin, attachScope, attendanceReportController.getAttendanceDashboard);
 
 module.exports = router;

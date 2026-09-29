@@ -11,6 +11,7 @@ const Bonus = require('../models/Bonus');
 const Reimbursement = require('../models/Reimbursement');
 const Loan = require('../models/Loan');
 const AdvanceSalary = require('../models/AdvanceSalary');
+const { markMissedCheckoutsAsHalfDay } = require('./attendance.service');
 const { logger } = require('../utils/logger');
 
 const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
@@ -155,6 +156,8 @@ const buildPartialLeavePaidDateSet = async (leaveRequest, weekendDaySet) => {
 // ---------------------------------------------------------------------------
 
 const getMonthlyAttendanceSummary = async (userId, month, year) => {
+    await markMissedCheckoutsAsHalfDay(userId);
+
     const monthStart = moment.tz([year, month - 1, 1], TZ).startOf('day');
     const monthEnd = moment(monthStart).endOf('month');
     const today = moment.tz(TZ).endOf('day');

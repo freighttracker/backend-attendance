@@ -3,6 +3,7 @@ const User = require('../models/User');
 const AttendanceRecord = require('../models/AttendanceRecord');
 const LeaveRequest = require('../models/LeaveRequest');
 const SalarySlip = require('../models/SalarySlip');
+const { markMissedCheckoutsAsHalfDay } = require('../services/attendance.service');
 const { successResponse, errorResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 
@@ -11,6 +12,8 @@ const { logger } = require('../utils/logger');
 // @access  Private/Admin
 exports.getAdminDashboard = async (req, res) => {
     try {
+        await markMissedCheckoutsAsHalfDay();
+
         const today = moment().startOf('day').toDate();
         const startOfMonth = moment().startOf('month').toDate();
         const endOfMonth = moment().endOf('month').toDate();
@@ -77,7 +80,9 @@ exports.getAdminDashboard = async (req, res) => {
 // @access  Private
 exports.getEmployeeDashboard = async (req, res) => {
     try {
+
         const userId = req.user.id;
+        await markMissedCheckoutsAsHalfDay(userId);
         const today = moment().startOf('day').toDate();
         const startOfMonth = moment().startOf('month').toDate();
         const endOfMonth = moment().endOf('month').toDate();

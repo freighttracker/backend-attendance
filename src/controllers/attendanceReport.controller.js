@@ -263,6 +263,7 @@ exports.getAttendanceCalendar = async (req, res) => {
         const monthStart = moment.tz([year, month - 1, 1], TZ).startOf('day');
         const monthEnd = moment(monthStart).endOf('month');
         const today = moment.tz(TZ).startOf('day');
+        const summary = await getMonthlyAttendanceSummary(id, month, year);
 
         const [weekendConfigs, holidays, leaveRequests, attendanceRecords] = await Promise.all([
             WeekendConfig.find({ isWeekend: true, isActive: true }),
@@ -297,6 +298,7 @@ exports.getAttendanceCalendar = async (req, res) => {
             const dateKey = cursor.format('YYYY-MM-DD');
             const dayOfWeek = cursor.format('dddd').toLowerCase();
             const record = recordByDate.get(dateKey);
+            
             const holiday = holidayByDate.get(dateKey);
             const leaveType = leaveByDate.get(dateKey);
             const isWeekendDay = weekendDaySet.has(dayOfWeek);
@@ -353,8 +355,6 @@ exports.getAttendanceCalendar = async (req, res) => {
 
             cursor.add(1, 'day');
         }
-
-        const summary = await getMonthlyAttendanceSummary(id, month, year);
 
         return successResponse(res, {
             month,

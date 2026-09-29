@@ -3,6 +3,7 @@ const AttendanceRecord = require('../models/AttendanceRecord');
 const User = require('../models/User');
 const LeaveRequest = require('../models/LeaveRequest');
 const SalarySlip = require('../models/SalarySlip');
+const { markMissedCheckoutsAsHalfDay } = require('../services/attendance.service');
 const { successResponse, errorResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 
@@ -11,6 +12,7 @@ const { logger } = require('../utils/logger');
 // @access  Private/Admin
 exports.getAttendanceReport = async (req, res) => {
     try {
+        await markMissedCheckoutsAsHalfDay();
         const { startDate, endDate, department, userId } = req.query;
 
         const query = {};

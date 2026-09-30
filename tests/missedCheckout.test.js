@@ -6,6 +6,8 @@ const seedData = require('../src/scripts/seed');
 const { AttendanceRecord } = require('../src/models');
 const { markMissedCheckoutsAsHalfDay } = require('../src/services/attendance.service');
 
+const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
+
 let app;
 let employee;
 
@@ -21,7 +23,7 @@ afterAll(async () => {
 });
 
 test('calendar marks a past check-in without checkout as half day', async () => {
-    const missedDate = moment().subtract(1, 'day').startOf('day');
+    const missedDate = moment.tz(TZ).subtract(1, 'day').startOf('day');
     while (missedDate.day() === 0 || missedDate.day() === 6) {
         missedDate.subtract(1, 'day');
     }
@@ -52,7 +54,7 @@ test('calendar marks a past check-in without checkout as half day', async () => 
 });
 
 test('does not mark today as half day while its check-in is still in progress', async () => {
-    const today = moment().startOf('day');
+    const today = moment.tz(TZ).startOf('day');
     const recordDate = today.toDate();
     await AttendanceRecord.deleteOne({ user: employee._id, date: recordDate });
     await AttendanceRecord.create({

@@ -1122,9 +1122,15 @@ const applyAttendanceCorrection = async (attendance, { checkInTime, checkOutTime
         attendance.isHalfDay = outcome.isHalfDay;
         attendance.isAbsent = outcome.isAbsent;
     } else if (attendance.checkIn.time) {
-        attendance.status = 'present';
+        // Check-in without check-out: a past day is incomplete (half day),
+        // today's is still in progress.
+        const isPastDay = moment.tz(attendance.date, TZ).isBefore(moment.tz(TZ).startOf('day'));
+        attendance.status = isPastDay ? 'half_day' : 'present';
+        attendance.isHalfDay = isPastDay;
+        attendance.isAbsent = false;
     }
 
+    attendance.isStatusOverridden = !!status;
     attendance.isCorrected = true;
     attendance.correctedBy = adminId;
     attendance.correctedAt = new Date();

@@ -30,15 +30,20 @@ exports.getHolidays = async (req, res) => {
 // @desc    Get holiday by ID
 // @route   GET /api/holidays/:id
 // @access  Private
+
 exports.getHoliday = async (req, res) => {
+
     try {
+
         const holiday = await Holiday.findById(req.params.id);
         if (!holiday) return errorResponse(res, 'Holiday not found', 404);
         return successResponse(res, holiday, 'Holiday retrieved successfully');
+        
     } catch (error) {
         logger.error('Get holiday error:', error);
         return errorResponse(res, error.message, 500);
     }
+    
 };
 
 // @desc    Create holiday
@@ -46,12 +51,14 @@ exports.getHoliday = async (req, res) => {
 // @access  Private/Admin
 exports.createHoliday = async (req, res) => {
     try {
+
         const holiday = await Holiday.create({
             ...req.body,
             createdBy: req.user.id
         });
         logger.info(`Holiday created: ${holiday.name} by ${req.user.id}`);
         return successResponse(res, holiday, 'Holiday created successfully', 201);
+
     } catch (error) {
         logger.error('Create holiday error:', error);
         return errorResponse(res, error.message, 500);

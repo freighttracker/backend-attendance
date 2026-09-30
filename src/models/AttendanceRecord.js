@@ -131,6 +131,12 @@ const attendanceRecordSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    // True only when an admin forced the day's status directly; such records
+    // are left alone by the missed-checkout half-day sweep.
+    isStatusOverridden: {
+        type: Boolean,
+        default: false
+    },
     correctedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'

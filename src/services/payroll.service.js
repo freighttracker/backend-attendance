@@ -130,7 +130,7 @@ const buildPartialLeavePaidDateSet = async (leaveRequest, weekendDaySet) => {
         isActive: true,
         date: { $gte: start.toDate(), $lte: end.toDate() }
     });
-    const holidayDateSet = new Set(rangeHolidays.map(h => moment(h.date).format('YYYY-MM-DD')));
+    const holidayDateSet = new Set(rangeHolidays.map(h => moment.tz(h.date, TZ).format('YYYY-MM-DD')));
 
     const paidDateSet = new Set();
     let remainingPaidDays = leaveRequest.paidDays || 0;
@@ -185,10 +185,10 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
             ? weekendConfigs.map(w => w.dayOfWeek)
             : ['saturday', 'sunday']
     );
-    const holidayDateSet = new Set(holidays.map(h => moment(h.date).format('YYYY-MM-DD')));
+    const holidayDateSet = new Set(holidays.map(h => moment.tz(h.date, TZ).format('YYYY-MM-DD')));
 
     const attendanceByDate = new Map();
-    attendanceRecords.forEach(r => attendanceByDate.set(moment(r.date).format('YYYY-MM-DD'), r));
+    attendanceRecords.forEach(r => attendanceByDate.set(moment.tz(r.date, TZ).format('YYYY-MM-DD'), r));
 
     // Expand each approved leave request into per-day paid/unpaid flags.
     // Paid/unpaid is decided by the admin at approval time
@@ -198,8 +198,8 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
     // specific days in this month were the paid ones.
     const leaveByDate = new Map();
     for (const lr of leaveRequests) {
-        const start = moment.max(moment(lr.startDate), monthStart);
-        const end = moment.min(moment(lr.endDate), monthEnd);
+        const start = moment.max(moment.tz(lr.startDate, TZ), monthStart);
+        const end = moment.min(moment.tz(lr.endDate, TZ), monthEnd);
 
         const partialPaidDateSet = lr.paidStatus === 'partial'
             ? await buildPartialLeavePaidDateSet(lr, weekendDaySet)

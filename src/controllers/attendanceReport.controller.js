@@ -278,13 +278,13 @@ exports.getAttendanceCalendar = async (req, res) => {
         ]);
 
         const weekendDaySet = new Set(weekendConfigs.length ? weekendConfigs.map((w) => w.dayOfWeek) : ['sunday']);
-        const holidayByDate = new Map(holidays.map((h) => [moment(h.date).format('YYYY-MM-DD'), h]));
-        const recordByDate = new Map(attendanceRecords.map((r) => [moment(r.date).format('YYYY-MM-DD'), r]));
+        const holidayByDate = new Map(holidays.map((h) => [moment.tz(h.date, TZ).format('YYYY-MM-DD'), h]));
+        const recordByDate = new Map(attendanceRecords.map((r) => [moment.tz(r.date, TZ).format('YYYY-MM-DD'), r]));
 
         const leaveByDate = new Map();
         leaveRequests.forEach((lr) => {
-            const start = moment.max(moment(lr.startDate), monthStart);
-            const end = moment.min(moment(lr.endDate), monthEnd);
+            const start = moment.max(moment.tz(lr.startDate, TZ), monthStart);
+            const end = moment.min(moment.tz(lr.endDate, TZ), monthEnd);
             const cursor = start.clone();
             while (cursor.isSameOrBefore(end, 'day')) {
                 leaveByDate.set(cursor.format('YYYY-MM-DD'), lr.leaveType);
@@ -307,6 +307,12 @@ exports.getAttendanceCalendar = async (req, res) => {
             let extra = {};
             if (record) {
                 status = record.status;
+                // Past day with check-in but no check-out is a half day,
+                // unless an admin explicitly overrode the status.
+                const missedCheckout = record.checkIn?.time && !record.checkOut?.time
+                    && cursor.isBefore(today, 'day') && ['present', 'wfh'].includes(status)
+                    && !record.isStatusOverridden;
+                if (missedCheckout) status = 'half_day';
                 extra = {
                     checkIn: record.checkIn?.time || null,
                     checkOut: record.checkOut?.time || null,
@@ -322,8 +328,9 @@ exports.getAttendanceCalendar = async (req, res) => {
                     earlyCheckinMinutes: record.earlyCheckinMinutes,
                     isGraceUsed: record.isGraceUsed,
                     isOvertime: record.isOvertime,
-                    isHalfDay: record.isHalfDay,
+                    isHalfDay: status === 'half_day' || record.isHalfDay,
                     isAbsent: record.isAbsent,
+                    isStatusOverridden: record.isStatusOverridden,
                     officeStartTime: record.officeStartTime,
                     officeEndTime: record.officeEndTime,
                     graceBeforeMinutes: record.graceBeforeMinutes,

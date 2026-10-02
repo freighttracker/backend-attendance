@@ -9,6 +9,7 @@ const SalaryStructure = require('../models/SalaryStructure');
 const { getMonthlyAttendanceSummary, computeSalaryDays, round2 } = require('../services/payroll.service');
 const { scopeFilter, canAccessUser } = require('../middleware/scope.middleware');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
+const { streamMonthlySummaryPDF } = require('../services/pdf.service');
 const { logger } = require('../utils/logger');
 
 const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
@@ -21,7 +22,33 @@ function fullName(user) {
 // Today's at-a-glance status per employee, resolved in a handful of bulk
 // queries (not one per employee) so it stays cheap to compute even for a
 // large filtered employee list.
-async function getTodayStatusMap(userIds) {  }
+async function getTodayStatusMap(userIds) {
+    const todayStart = moment.tz(TZ).startOf('day');
+    const todayEnd = moment(todayStart).endOf('day');
+    const dayOfWeek = todayStart.format('dddd').toLowerCase();
+
+    const [records, leaves, holiday, weekendConfigs] = await Promise.all([
+        AttendanceRecord.find({ user: { $in: userIds }, date: { $gte: todayStart.toDate(), $lte: todayEnd.toDate() } })
+            .select('user status'),
+        LeaveRequest.find({
+            user: { $in: userIds },
+            status: 'approved',
+            startDate: { $lte: todayEnd.toDate() },
+            endDate: { $gte: todayStart.toDate() }
+        }).select('user'),
+        Holiday.findOne({ isActive: true, date: { $gte: todayStart.toDate(), $lte: todayEnd.toDate() } }),
+        WeekendConfig.find({ isWeekend: true, isActive: true })
+    ]);
+
+    const weekendDays = weekendConfigs.length > 0 ? weekendConfigs.map((w) => w.dayOfWeek) : ['saturday', 'sunday'];
+    const fallback = holiday ? 'holiday' : weekendDays.includes(dayOfWeek) ? 'weekend' : 'absent';
+
+    const map = new Map(userIds.map((id) => [String(id), fallback]));
+    leaves.forEach((l) => map.set(String(l.user), 'on_leave'));
+    // An actual attendance record for today always wins over the defaults.
+    records.forEach((r) => map.set(String(r.user), r.status));
+    return map;
+}
 
 // Prefers the actual generated slip's real gross/net for the month; falls
 // back to an estimate derived from the active salary structure and this
@@ -63,6 +90,7 @@ async function buildEmployeeRow(user, month, year, todayStatus) {
         name: fullName(user),
         department: user.department || null,
         designation: user.designation || null,
+        daysInMonth: attendance.daysInMonth,
         workingDays: attendance.workingDays,
         presentDays: attendance.presentDays,
         absentDays: attendance.absentDays,
@@ -111,44 +139,70 @@ function buildSummary(rows) {
     };
 }
 
+// Shared by the JSON report and its PDF export so both always show the same
+// employees and figures for a given set of filters.
+async function loadMonthlyRows(req) {
+    const now = moment.tz(TZ);
+    const month = parseInt(req.query.month) || (now.month() + 1);
+    const year = parseInt(req.query.year) || now.year();
+    const { department, designation, userId, search, status } = req.query;
+
+    const userFilter = { role: { $ne: 'admin' }, ...scopeFilter(req) };
+    if (department) userFilter.department = department;
+    if (designation) userFilter.designation = designation;
+    if (userId) userFilter._id = userId;
+    if (search) {
+        const re = new RegExp(search.trim(), 'i');
+        userFilter.$or = [{ firstName: re }, { lastName: re }, { employeeCode: re }];
+    }
+
+    let users = await User.find(userFilter)
+        .select('firstName lastName employeeCode department designation')
+        .sort({ employeeCode: 1 });
+
+    const statusMap = users.length ? await getTodayStatusMap(users.map((u) => u._id)) : new Map();
+    if (status) {
+        users = users.filter((u) => statusMap.get(String(u._id)) === status);
+    }
+
+    const rows = await Promise.all(users.map((u) => buildEmployeeRow(u, month, year, statusMap.get(String(u._id)))));
+    return { month, year, rows };
+}
+
+// @desc    Monthly attendance + salary summary for every employee, as a PDF
+// @route   GET /api/attendance/report/monthly/pdf
+// @access  Private/Admin
+exports.exportMonthlyReportPdf = async (req, res) => {
+    try {
+        const { month, year, rows } = await loadMonthlyRows(req);
+        const summary = buildSummary(rows);
+        const fileName = `Monthly-Summary-${moment([year, month - 1]).format('MMM-YYYY')}.pdf`;
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+        await streamMonthlySummaryPDF(res, { month, year, rows, summary });
+    } catch (error) {
+        logger.error('Export monthly report PDF error:', error);
+        if (!res.headersSent) return errorResponse(res, error.message, 500);
+        res.end();
+    }
+};
+
 // @desc    Monthly attendance report - summary cards + per-employee table
 // @route   GET /api/attendance/report/monthly
 // @access  Private/Admin
 exports.getMonthlyReport = async (req, res) => {
-    
+
     try {
-        const now = moment.tz(TZ);
-        const month = parseInt(req.query.month) || (now.month() + 1);
-        const year = parseInt(req.query.year) || now.year();
-        const { department, designation, userId, search, status } = req.query;
         const page = Math.max(parseInt(req.query.page) || 1, 1);
         const limit = Math.max(parseInt(req.query.limit) || 20, 1);
 
-        const userFilter = { role: { $ne: 'admin' }, ...scopeFilter(req) };
-        if (department) userFilter.department = department;
-        if (designation) userFilter.designation = designation;
-        if (userId) userFilter._id = userId;
-        if (search) {
-            const re = new RegExp(search.trim(), 'i');
-            userFilter.$or = [{ firstName: re }, { lastName: re }, { employeeCode: re }];
-        }
-
-        let users = await User.find(userFilter)
-            .select('firstName lastName employeeCode department designation')
-            .sort({ employeeCode: 1 });
-
-        const statusMap = users.length ? await getTodayStatusMap(users.map((u) => u._id)) : new Map();
-
-        if (status) {
-            users = users.filter((u) => statusMap.get(String(u._id)) === status);
-        }
-
         // NOTE: summary cards must reflect the whole filtered set, not just the
         // current page, so every matching employee's monthly summary is computed
-        // here and only sliced into a page afterwards. Fine at typical HRMS
+        // first and only sliced into a page afterwards. Fine at typical HRMS
         // headcounts; if this ever needs to scale to thousands of employees,
         // switch to a single aggregation pipeline instead of per-employee calls.
-        const rows = await Promise.all(users.map((u) => buildEmployeeRow(u, month, year, statusMap.get(String(u._id)))));
+        const { month, year, rows } = await loadMonthlyRows(req);
         const summary = buildSummary(rows);
 
         const total = rows.length;

@@ -254,9 +254,10 @@ exports.markAsPaid = async (req, res) => {
 // @access  Private
 exports.downloadSalarySlip = async (req, res) => {
     try {
+
         const slip = await SalarySlip.findById(req.params.id);
         if (!slip) return errorResponse(res, 'Salary slip not found', 404);
-        if (req.user.role !== 'admin' && slip.user.toString() !== req.user.id) {
+        if (!['admin', 'superadmin'].includes(req.user.role) && slip.user.toString() !== req.user.id) {
             return errorResponse(res, 'Not authorized', 403);
         }
 
@@ -269,6 +270,7 @@ exports.downloadSalarySlip = async (req, res) => {
         }
 
         return res.download(pdfPath, `Salary-Slip-${slip.employeeSnapshot.employeeCode}-${slip.month}-${slip.year}.pdf`);
+        
     } catch (error) {
         logger.error('Download salary slip error:', error);
         return errorResponse(res, error.message, 500);
@@ -280,6 +282,7 @@ exports.downloadSalarySlip = async (req, res) => {
 // @access  Private/Admin
 exports.emailSalarySlip = async (req, res) => {
     try {
+        
         const slip = await SalarySlip.findById(req.params.id);
         if (!slip) return errorResponse(res, 'Salary slip not found', 404);
 

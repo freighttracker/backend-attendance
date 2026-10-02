@@ -1098,8 +1098,9 @@ const computeCheckoutOutcome = (rule, checkInTime, checkOutTime) => {
 // otherwise the outcome is recalculated from the (possibly corrected)
 // check-in/check-out times, exactly like a live checkout would.
 const applyAttendanceCorrection = async (attendance, { checkInTime, checkOutTime, status } = {}, adminId, reason) => {
-    const previousStatus = attendance.status;
 
+    const previousStatus = attendance.status;
+    
     if (checkInTime) attendance.checkIn.time = checkInTime;
     if (checkOutTime) attendance.checkOut.time = checkOutTime;
 
@@ -1888,6 +1889,7 @@ exports.updateAttendanceSettings = async (req, res) => {
         if (absentThresholdHours !== undefined) rule.absentThresholdHours = absentThresholdHours;
         if (overtimeThreshold !== undefined) rule.overtimeThreshold = overtimeThreshold;
         if (lunchBreakMinutes !== undefined) rule.lunchBreakMinutes = lunchBreakMinutes;
+        
         rule.isDefault = true;
         rule.isActive = true;
 
@@ -1919,6 +1921,7 @@ exports.getEmployeeAttendance = async (req, res) => {
         await markMissedCheckoutsAsHalfDay(id);
 
         const { page = 1, limit = 30, startDate, endDate, status } = req.query;
+
         const query = { user: id };
         if (status) query.status = status;
         if (startDate && endDate) {

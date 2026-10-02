@@ -163,4 +163,129 @@ const generateSalarySlipPDF = async (salarySlip) => {
     });
 };
 
-module.exports = { generateSalarySlipPDF };
+// ---------------------------------------------------------------------------
+// Monthly attendance + salary summary for every employee, streamed straight
+// to the HTTP response (nothing written to disk). A4 landscape table with the
+// header row repeated on each page and a totals row at the end.
+// ---------------------------------------------------------------------------
+const SUMMARY_COLUMNS = [
+    { key: 'idx', label: '#', width: 22, align: 'left' },
+    { key: 'employeeCode', label: 'Emp ID', width: 58, align: 'left' },
+    { key: 'name', label: 'Name', width: 120, align: 'left' },
+    { key: 'department', label: 'Department', width: 80, align: 'left' },
+    { key: 'daysInMonth', label: 'Total Days', width: 44, align: 'right' },
+    { key: 'workingDays', label: 'Working', width: 44, align: 'right' },
+    { key: 'presentDays', label: 'Present', width: 42, align: 'right' },
+    { key: 'halfDays', label: 'Half Day', width: 42, align: 'right' },
+    { key: 'absentDays', label: 'Absent', width: 40, align: 'right' },
+    { key: 'leave', label: 'Leave P/U', width: 48, align: 'right' },
+    { key: 'offs', label: 'W.Off/Hol', width: 48, align: 'right' },
+    { key: 'salaryDays', label: 'Payable Days', width: 52, align: 'right' },
+    { key: 'grossSalary', label: 'Gross', width: 70, align: 'right' },
+    { key: 'netSalary', label: 'Salary', width: 72, align: 'right' }
+];
+
+const money = (n) => (n === null || n === undefined ? '-' : Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+const streamMonthlySummaryPDF = async (res, { month, year, rows, summary }) => {
+    const company = await getCompanyProfile();
+    const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 30 });
+    doc.pipe(res);
+
+    const left = 30;
+    const tableWidth = SUMMARY_COLUMNS.reduce((s, c) => s + c.width, 0);
+    const bottomLimit = doc.page.height - 50;
+    const rowH = 16;
+    const period = moment([year, month - 1]).format('MMMM YYYY');
+
+    const drawRow = (cells, y, { bold = false, fill = null, color = '#000000' } = {}) => {
+        if (fill) {
+            doc.rect(left, y, tableWidth, rowH).fill(fill);
+        }
+        doc.fillColor(color).font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(7.5);
+        let x = left;
+        SUMMARY_COLUMNS.forEach((c) => {
+            doc.text(String(cells[c.key] ?? ''), x + 3, y + 4.5, { width: c.width - 6, align: c.align, lineBreak: false, ellipsis: true });
+            x += c.width;
+        });
+        doc.fillColor('#000000');
+        return y + rowH;
+    };
+
+    const headerCells = Object.fromEntries(SUMMARY_COLUMNS.map((c) => [c.key, c.label]));
+    const drawTableHeader = (y) => drawRow(headerCells, y, { bold: true, fill: '#1f2937', color: '#ffffff' });
+
+    // Title block
+    doc.fontSize(15).font('Helvetica-Bold').text(company.name, left, 30);
+    doc.fontSize(8.5).font('Helvetica').fillColor('#4b5563').text(company.address || '', left, 49, { width: 450 });
+    doc.fillColor('#000000').fontSize(13).font('Helvetica-Bold')
+        .text('MONTHLY ATTENDANCE & SALARY SUMMARY', left, 30, { width: tableWidth, align: 'right' });
+    doc.fontSize(9.5).font('Helvetica')
+        .text(`Period: ${period}`, left, 48, { width: tableWidth, align: 'right' })
+        .text(`Generated: ${moment().format('DD MMM YYYY, hh:mm A')}`, left, 61, { width: tableWidth, align: 'right' });
+
+    doc.fontSize(9).font('Helvetica-Bold').text(
+        `Employees: ${summary.totalEmployees}    Working days: ${summary.workingDays}    ` +
+        `Present: ${summary.presentDays}    Half days: ${summary.halfDays}    Absent: ${summary.absentDays}    ` +
+        `Attendance: ${summary.attendancePercentage}%`,
+        left, 82
+    );
+
+    let y = drawTableHeader(100);
+
+    let totalGross = 0;
+    let totalNet = 0;
+    let hasEstimate = false;
+
+    rows.forEach((r, i) => {
+        if (y + rowH > bottomLimit) {
+            doc.addPage();
+            y = drawTableHeader(30);
+        }
+        if (r.salarySource === 'estimated') hasEstimate = true;
+        totalGross += r.grossSalary || 0;
+        totalNet += r.netSalary || 0;
+        y = drawRow({
+            idx: i + 1,
+            employeeCode: r.employeeCode,
+            name: r.name,
+            department: r.department || '-',
+            daysInMonth: r.daysInMonth,
+            workingDays: r.workingDays,
+            presentDays: r.presentDays,
+            halfDays: r.halfDays,
+            absentDays: r.absentDays,
+            leave: `${r.paidLeaveDays}/${r.unpaidLeaveDays}`,
+            offs: `${r.weeklyOffs}/${r.holidays}`,
+            salaryDays: r.salaryDays,
+            grossSalary: money(r.grossSalary),
+            netSalary: `${money(r.netSalary)}${r.salarySource === 'estimated' ? ' *' : ''}`
+        }, y, { fill: i % 2 === 0 ? '#f9fafb' : null });
+    });
+
+    if (y + rowH * 3 > bottomLimit) {
+        doc.addPage();
+        y = 30;
+    }
+    doc.rect(left, y, tableWidth, 1).fill('#9ca3af');
+    y = drawRow({
+        name: 'TOTAL',
+        presentDays: summary.presentDays,
+        halfDays: summary.halfDays,
+        absentDays: summary.absentDays,
+        leave: `${summary.paidLeaves}/${summary.unpaidLeaves}`,
+        salaryDays: summary.payrollDays,
+        grossSalary: money(totalGross),
+        netSalary: money(totalNet)
+    }, y + 2, { bold: true, fill: '#e5e7eb' });
+
+    doc.fontSize(7.5).font('Helvetica').fillColor('#6b7280').text(
+        'Salary = Gross / total days in month x payable days (present + half days x 0.5 + paid leave + week offs + holidays). ' +
+        (hasEstimate ? '* Estimated - payroll not yet generated for this employee/month; final slip may include other deductions.' : ''),
+        left, y + 8, { width: tableWidth }
+    );
+
+    doc.end();
+};
+
+module.exports = { generateSalarySlipPDF, streamMonthlySummaryPDF };

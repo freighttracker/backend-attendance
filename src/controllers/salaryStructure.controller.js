@@ -116,19 +116,36 @@ const { logger } = require('../utils/logger');
                 return successResponse(res, structure, 'Salary structure created successfully', 201);
             }
 
-            const newEffectiveFrom = effectiveFrom ? new Date(effectiveFrom) : new Date();
+            const newEffectiveFrom = moment(effectiveFrom ? new Date(effectiveFrom) : new Date()).startOf('day').toDate();
+            const newEffectiveTo = moment(newEffectiveFrom).subtract(1, 'day').endOf('day').toDate();
 
-            structure.revisionHistory.push({
-                monthlyGrossSalary: structure.monthlyGrossSalary,
-                annualCTC: structure.annualCTC,
-                earnings: structure.earnings,
-                deductions: structure.deductions,
-                overtime: structure.overtime,
-                effectiveFrom: structure.effectiveFrom,
-                effectiveTo: moment(newEffectiveFrom).subtract(1, 'day').endOf('day').toDate(),
-                revisedBy: req.user.id,
-                remarks: remarks || 'Salary revised'
-            });
+            // Any archived version starting on/after the new effective date is
+            // superseded entirely; one that overlaps it is cut short. Without
+            // this, back-dating a correction (e.g. fixing last month's
+            // components) left the stale version in force for that month.
+            structure.revisionHistory = structure.revisionHistory
+                .filter(r => !r.effectiveFrom || r.effectiveFrom < newEffectiveFrom)
+                .map(r => {
+                    if (!r.effectiveTo || r.effectiveTo >= newEffectiveFrom) r.effectiveTo = newEffectiveTo;
+                    return r;
+                });
+
+            // Only archive the current version if it was actually in force
+            // for some period before the new one starts - otherwise this edit
+            // is a correction of it, not a revision.
+            if (structure.effectiveFrom < newEffectiveFrom) {
+                structure.revisionHistory.push({
+                    monthlyGrossSalary: structure.monthlyGrossSalary,
+                    annualCTC: structure.annualCTC,
+                    earnings: structure.earnings,
+                    deductions: structure.deductions,
+                    overtime: structure.overtime,
+                    effectiveFrom: structure.effectiveFrom,
+                    effectiveTo: newEffectiveTo,
+                    revisedBy: req.user.id,
+                    remarks: remarks || 'Salary revised'
+                });
+            }
 
             if (monthlyGrossSalary !== undefined) structure.monthlyGrossSalary = monthlyGrossSalary;
             if (annualCTC !== undefined) structure.annualCTC = annualCTC;

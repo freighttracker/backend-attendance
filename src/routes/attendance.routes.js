@@ -32,6 +32,7 @@ router.put('/settings', authenticate, authorize('superadmin', 'admin'), attendan
 // are also reachable by a plain employee viewing their own record, and
 // attachScope just resolves whatever req.scope applies to the caller's role.
 router.get('/report/monthly', authenticate, anyAdmin, attachScope, attendanceReportController.getMonthlyReport);
+router.get('/report/monthly/pdf', authenticate, anyAdmin, attachScope, attendanceReportController.exportMonthlyReportPdf);
 router.get('/report/employee/:id', authenticate, attachScope, attendanceReportController.getEmployeeReport);
 router.get('/calendar/:id', authenticate, attachScope, attendanceReportController.getAttendanceCalendar);
 router.get('/dashboard', authenticate, anyAdmin, attachScope, attendanceReportController.getAttendanceDashboard);

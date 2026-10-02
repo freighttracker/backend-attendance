@@ -12,12 +12,12 @@ const { logger } = require('../utils/logger');
 // @access  Private/Admin
 exports.getAdminDashboard = async (req, res) => {
     try {
-        await markMissedCheckoutsAsHalfDay();
 
+        await markMissedCheckoutsAsHalfDay();
         const today = moment().startOf('day').toDate();
         const startOfMonth = moment().startOf('month').toDate();
         const endOfMonth = moment().endOf('month').toDate();
-
+ 
         // Employee stats
         const totalEmployees = await User.countDocuments({ role: 'employee', isActive: true });
         const newEmployees = await User.countDocuments({
@@ -69,6 +69,7 @@ exports.getAdminDashboard = async (req, res) => {
             monthlyStats,
             recentAttendance
         }, 'Admin dashboard data retrieved');
+        
     } catch (error) {
         logger.error('Admin dashboard error:', error);
         return errorResponse(res, error.message, 500);
@@ -84,6 +85,8 @@ exports.getEmployeeDashboard = async (req, res) => {
         const userId = req.user.id;
         await markMissedCheckoutsAsHalfDay(userId);
         const today = moment().startOf('day').toDate();
+
+        
         const startOfMonth = moment().startOf('month').toDate();
         const endOfMonth = moment().endOf('month').toDate();
 
@@ -134,6 +137,7 @@ exports.getEmployeeDashboard = async (req, res) => {
             pendingLeaves,
             recentAttendance
         }, 'Employee dashboard data retrieved');
+
     } catch (error) {
         logger.error('Employee dashboard error:', error);
         return errorResponse(res, error.message, 500);

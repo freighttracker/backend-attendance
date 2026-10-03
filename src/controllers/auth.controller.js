@@ -150,12 +150,12 @@ exports.login = async (req, res) => {
 // @access  Public
 exports.refreshToken = async (req, res) => {
     try {
-        const { refreshToken } = req.body;
+        
+        const {refreshToken } = req.body;
 
         if (!refreshToken) {
             return errorResponse(res, 'Refresh token is required', 400);
         }
-
         const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
         const user = await User.findById(decoded.userId);
 
@@ -172,9 +172,12 @@ exports.refreshToken = async (req, res) => {
             token: newToken,
             refreshToken: newRefreshToken
         }, 'Token refreshed successfully');
+
     } catch (error) {
+
         logger.error('Refresh token error:', error);
         return errorResponse(res, 'Invalid refresh token', 401);
+
     }
 };
 

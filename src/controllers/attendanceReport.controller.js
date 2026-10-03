@@ -4,6 +4,7 @@ const AttendanceRecord = require('../models/AttendanceRecord');
 const LeaveRequest = require('../models/LeaveRequest');
 const Holiday = require('../models/Holiday');
 const WeekendConfig = require('../models/WeekendConfig');
+const AttendanceCorrectionRequest = require('../models/AttendanceCorrectionRequest');
 const SalarySlip = require('../models/SalarySlip');
 const SalaryStructure = require('../models/SalaryStructure');
 const { getMonthlyAttendanceSummary, computeSalaryDays, round2 } = require('../services/payroll.service');
@@ -319,7 +320,7 @@ exports.getAttendanceCalendar = async (req, res) => {
         const today = moment.tz(TZ).startOf('day');
         const summary = await getMonthlyAttendanceSummary(id, month, year);
 
-        const [weekendConfigs, holidays, leaveRequests, attendanceRecords] = await Promise.all([
+        const [weekendConfigs, holidays, leaveRequests, attendanceRecords, correctionRequests] = await Promise.all([
             WeekendConfig.find({ isWeekend: true, isActive: true }),
             Holiday.find({ isActive: true, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } }),
             LeaveRequest.find({
@@ -328,12 +329,20 @@ exports.getAttendanceCalendar = async (req, res) => {
                 startDate: { $lte: monthEnd.toDate() },
                 endDate: { $gte: monthStart.toDate() }
             }).populate('leaveType', 'name isPaid colorCode'),
-            AttendanceRecord.find({ user: id, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } })
+            AttendanceRecord.find({ user: id, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } }),
+            AttendanceCorrectionRequest.find({ user: id, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } })
+                .sort({ createdAt: 1 })
+                .select('date status requestedCheckIn requestedCheckOut reason rejectionReason overrideStatus')
         ]);
 
         const weekendDaySet = new Set(weekendConfigs.length ? weekendConfigs.map((w) => w.dayOfWeek) : ['sunday']);
         const holidayByDate = new Map(holidays.map((h) => [moment.tz(h.date, TZ).format('YYYY-MM-DD'), h]));
         const recordByDate = new Map(attendanceRecords.map((r) => [moment.tz(r.date, TZ).format('YYYY-MM-DD'), r]));
+
+        // Latest correction request per day (sorted ascending, so later ones
+        // overwrite earlier), so the Correct tab's calendar can flag days
+        // with a pending/approved/rejected request without a second call.
+        const correctionByDate = new Map(correctionRequests.map((c) => [moment.tz(c.date, TZ).format('YYYY-MM-DD'), c]));
 
         const leaveByDate = new Map();
         leaveRequests.forEach((lr) => {
@@ -389,7 +398,13 @@ exports.getAttendanceCalendar = async (req, res) => {
                     officeEndTime: record.officeEndTime,
                     graceBeforeMinutes: record.graceBeforeMinutes,
                     graceAfterMinutes: record.graceAfterMinutes,
-                    notes: record.notes
+                    notes: record.notes,
+                    attendanceRecordId: record._id,
+                    isLocked: !!record.isLocked,
+                    isCorrected: !!record.isCorrected,
+                    correctedAt: record.correctedAt || null,
+                    correctionReason: record.correctionReason || null,
+                    previousStatus: record.previousStatus || null
                 };
             } else if (isWeekendDay) {
                 status = 'weekend';
@@ -403,6 +418,8 @@ exports.getAttendanceCalendar = async (req, res) => {
                 status = 'absent';
             }
 
+            const correction = correctionByDate.get(dateKey);
+
             days.push({
                 date: dateKey,
                 day: cursor.date(),
@@ -411,6 +428,16 @@ exports.getAttendanceCalendar = async (req, res) => {
                 isWeekend: isWeekendDay,
                 holidayName: holiday ? holiday.name : null,
                 leaveType: leaveType ? { name: leaveType.name, isPaid: leaveType.isPaid, colorCode: leaveType.colorCode } : null,
+                isFuture: cursor.isAfter(today, 'day'),
+                correctionRequest: correction ? {
+                    id: correction._id,
+                    status: correction.status,
+                    requestedCheckIn: correction.requestedCheckIn || null,
+                    requestedCheckOut: correction.requestedCheckOut || null,
+                    reason: correction.reason,
+                    rejectionReason: correction.rejectionReason || null,
+                    overrideStatus: correction.overrideStatus || null
+                } : null,
                 ...extra
             });
 

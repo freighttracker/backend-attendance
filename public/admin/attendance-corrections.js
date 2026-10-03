@@ -20,12 +20,15 @@ function fmtTime(d) {
 }
 // Local "HH:mm" from a stored ISO time, for prefilling <input type="time">.
 function toTimeInput(d) {
+
     if (!d) return '';
     const dt = new Date(d);
     return String(dt.getHours()).padStart(2, '0') + ':' + String(dt.getMinutes()).padStart(2, '0');
+
 }
 
 async function api(path, opts = {}) {
+
     const res = await fetch(API + path, {
         ...opts,
         headers: {
@@ -57,6 +60,7 @@ function showLogin() {
 
 el('loginBtn').addEventListener('click', async () => {
     el('loginMsg').textContent = '';
+
     try {
         const data = await api('/api/auth/login', {
             method: 'POST',
@@ -74,6 +78,7 @@ el('loginBtn').addEventListener('click', async () => {
         el('loginMsg').textContent = err.message;
         el('loginMsg').className = 'msg error';
     }
+
 });
 
 el('logoutBtn').addEventListener('click', () => {
@@ -85,17 +90,20 @@ el('logoutBtn').addEventListener('click', () => {
 });
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
+
     btn.addEventListener('click', () => {
         document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         document.querySelectorAll('main section.card').forEach((s) => s.classList.add('hidden'));
         el('tab-' + btn.dataset.tab).classList.remove('hidden');
     });
+
 });
 
 // ---- Pending correction requests ----------------------------------------
 
 async function loadPending() {
+
     el('pendingMsg').textContent = '';
     try {
         const { data } = await api('/api/attendance/corrections?status=pending&limit=100');
@@ -104,11 +112,13 @@ async function loadPending() {
         el('pendingMsg').textContent = err.message;
         el('pendingMsg').className = 'msg error';
     }
+
 }
 
 function renderPending(requests) {
     const tbody = el('pendingRows');
     tbody.innerHTML = '';
+
     if (!requests.length) {
         tbody.innerHTML = '<tr><td colspan="6">No pending correction requests.</td></tr>';
         return;
@@ -166,6 +176,7 @@ function renderPending(requests) {
             const ci = formRow.querySelector('.ci-input').value;
             const co = formRow.querySelector('.co-input').value;
             const status = formRow.querySelector('.status-input').value;
+            
             try {
                 await api(`/api/attendance/corrections/${r._id}`, {
                     method: 'PUT',
@@ -186,6 +197,7 @@ function renderPending(requests) {
         });
 
         formRow.querySelector('.reject-btn').addEventListener('click', async () => {
+
             const msg = formRow.querySelector('.row-msg');
             const rejectionReason = prompt('Reason for rejecting this request:');
             if (rejectionReason === null) return;

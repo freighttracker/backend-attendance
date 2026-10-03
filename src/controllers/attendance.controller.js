@@ -1565,12 +1565,18 @@ exports.getMyCorrectionRequests = async (req, res) => {
 // @access  Private/Admin
 exports.getCorrectionRequests = async (req, res) => {
     try {
-        const { status = 'pending', page = 1, limit = 20 } = req.query;
+        const { status = 'pending', userId, page = 1, limit = 20 } = req.query;
+
+        // status=all lists every request; userId narrows to one employee
+        // (used by the admin Correct tab's calendar view).
+        const query = {};
+        if (status !== 'all') query.status = status;
+        if (userId) query.user = userId;
 
         const skip = (parseInt(page) - 1) * parseInt(limit);
-        const total = await AttendanceCorrectionRequest.countDocuments({ status });
+        const total = await AttendanceCorrectionRequest.countDocuments(query);
 
-        const requests = await AttendanceCorrectionRequest.find({ status })
+        const requests = await AttendanceCorrectionRequest.find(query)
             .populate('user', 'firstName lastName employeeCode')
             .populate('attendanceRecord')
             .sort({ createdAt: -1 })
@@ -1598,6 +1604,9 @@ exports.handleCorrectionRequest = async (req, res) => {
         const requestId = req.params.id;
         const validStatuses = ['present', 'absent', 'half_day', 'on_leave', 'weekend', 'holiday', 'wfh'];
 
+        if (!['approved', 'rejected'].includes(status)) {
+            return errorResponse(res, 'Status must be either approved or rejected', 400);
+        }
         if (overrideStatus && !validStatuses.includes(overrideStatus)) {
             return errorResponse(res, `overrideStatus must be one of: ${validStatuses.join(', ')}`, 400);
         }
@@ -1721,6 +1730,9 @@ exports.correctAttendanceRecord = async (req, res) => {
 
         if (attendance.isLocked) {
             return errorResponse(res, 'Attendance is locked and cannot be corrected', 400);
+        }
+        if (moment.tz(attendance.date, TZ).isAfter(moment.tz(TZ), 'day')) {
+            return errorResponse(res, 'Cannot correct attendance for a future date', 400);
         }
 
         await applyAttendanceCorrection(attendance, {

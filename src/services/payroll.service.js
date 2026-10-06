@@ -247,8 +247,22 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
             continue;
         }
 
-        summary.workingDays += 1;
         const record = attendanceByDate.get(dateStr);
+
+        // Admin forced this working day to Weekend/Holiday (via a correction)
+        // - treat it as a paid day off, same as the configured ones above.
+        if (record && record.status === 'weekend') {
+            summary.weeklyOffs += 1;
+            cursor.add(1, 'day');
+            continue;
+        }
+        if (record && record.status === 'holiday') {
+            summary.holidays += 1;
+            cursor.add(1, 'day');
+            continue;
+        }
+
+        summary.workingDays += 1;
         const leave = leaveByDate.get(dateStr);
 
         if (record) {

@@ -19,9 +19,11 @@ router.get('/employee/:id', authenticate, attendanceController.getEmployeeAttend
 // Admin routes
 const anyAdmin = authorize('superadmin', 'admin', 'company_admin', 'subcompany_admin');
 router.get('/all', authenticate, anyAdmin, attachScope, attendanceController.getAllAttendance);
-router.get('/corrections', authenticate, authorize('superadmin', 'admin'), attendanceController.getCorrectionRequests);
-router.put('/corrections/:id', authenticate, authorize('superadmin', 'admin'), attendanceController.handleCorrectionRequest);
-router.put('/correct', authenticate, authorize('superadmin', 'admin'), attendanceController.correctAttendanceRecord);
+// Corrections are reviewable by every admin tier; attachScope + the
+// controllers' scope checks keep company/subcompany admins to their own staff.
+router.get('/corrections', authenticate, anyAdmin, attachScope, attendanceController.getCorrectionRequests);
+router.put('/corrections/:id', authenticate, anyAdmin, attachScope, attendanceController.handleCorrectionRequest);
+router.put('/correct', authenticate, anyAdmin, attachScope, attendanceController.correctAttendanceRecord);
 router.post('/lock', authenticate, authorize('superadmin', 'admin'), attendanceController.lockAttendance);
 router.get('/report', authenticate, anyAdmin, attachScope, attendanceReportController.getMonthlyReport);
 router.get('/settings', authenticate, authorize('superadmin', 'admin'), attendanceController.getAttendanceSettings);

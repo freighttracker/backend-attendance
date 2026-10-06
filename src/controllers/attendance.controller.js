@@ -969,7 +969,7 @@ const Holiday = require('../models/Holiday');
 const LeaveRequest = require('../models/LeaveRequest');
 const AttendanceCorrectionRequest = require('../models/AttendanceCorrectionRequest');
 const Notification = require('../models/Notification');
-const { scopeFilter } = require('../middleware/scope.middleware');
+const { scopeFilter, canAccessUser } = require('../middleware/scope.middleware');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 const { markMissedCheckoutsAsHalfDay } = require('../services/attendance.service');
@@ -1571,7 +1571,17 @@ exports.getCorrectionRequests = async (req, res) => {
         // (used by the admin Correct tab's calendar view).
         const query = {};
         if (status !== 'all') query.status = status;
-        if (userId) query.user = userId;
+
+        // Restrict to employees inside the caller's company/subcompany scope.
+        const scope = scopeFilter(req);
+        if (Object.keys(scope).length) {
+            const scopedIds = await User.find(scope).distinct('_id');
+            query.user = userId
+                ? (scopedIds.some((id) => String(id) === String(userId)) ? userId : null)
+                : { $in: scopedIds };
+        } else if (userId) {
+            query.user = userId;
+        }
 
         const skip = (parseInt(page) - 1) * parseInt(limit);
         const total = await AttendanceCorrectionRequest.countDocuments(query);
@@ -1618,6 +1628,11 @@ exports.handleCorrectionRequest = async (req, res) => {
 
         if (correctionRequest.status !== 'pending') {
             return errorResponse(res, 'Correction request has already been processed', 400);
+        }
+
+        const requester = await User.findById(correctionRequest.user).select('company subCompany');
+        if (!requester || !canAccessUser(req, requester)) {
+            return errorResponse(res, 'Not authorized', 403);
         }
 
         // Backfill date on legacy correction requests that predate the required `date` field
@@ -1726,6 +1741,11 @@ exports.correctAttendanceRecord = async (req, res) => {
             if (!attendance) {
                 attendance = new AttendanceRecord({ user: userId, date: recordDate, status: 'present' });
             }
+        }
+
+        const targetUser = await User.findById(attendance.user).select('company subCompany');
+        if (!targetUser || !canAccessUser(req, targetUser)) {
+            return errorResponse(res, 'Not authorized', 403);
         }
 
         if (attendance.isLocked) {

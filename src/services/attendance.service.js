@@ -7,6 +7,7 @@ const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
 // A checked-in record from a previous day with no checkout is incomplete, so
 // count it as a half day when attendance is next read or used for payroll.
 const markMissedCheckoutsAsHalfDay = async (userId = null) => {
+
     const today = moment.tz(TZ).startOf('day').toDate();
     const query = {
         date: { $lt: today },
@@ -18,6 +19,7 @@ const markMissedCheckoutsAsHalfDay = async (userId = null) => {
         // checkout; only an explicit admin status override is respected.
         isStatusOverridden: { $ne: true }
     };
+    
     if (userId) query.user = userId;
 
     const result = await AttendanceRecord.updateMany(query, {

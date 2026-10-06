@@ -19,10 +19,10 @@ const ADMIN_TIER_ROLES = ['superadmin', 'admin', 'company_admin', 'subcompany_ad
 function fullName(user) {
     return `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.employeeCode;
 }
-
 // Today's at-a-glance status per employee, resolved in a handful of bulk
 // queries (not one per employee) so it stays cheap to compute even for a
 // large filtered employee list.
+
 async function getTodayStatusMap(userIds) {
     const todayStart = moment.tz(TZ).startOf('day');
     const todayEnd = moment(todayStart).endOf('day');

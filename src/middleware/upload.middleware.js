@@ -8,6 +8,7 @@ fs.mkdirSync(LEAVE_ATTACHMENTS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
+
         let uploadPath = 'uploads/';
         if (file.fieldname === 'avatar') {
             uploadPath += 'avatars/';
@@ -16,9 +17,7 @@ const storage = multer.diskStorage({
         } else if (file.fieldname === 'file') {
             uploadPath += 'documents/';
         }
-        cb(null, uploadPath);
-
-         
+        cb(null, uploadPath);         
     },
     filename: (req, file, cb) => {
         const uniqueName = `${uuidv4()}${path.extname(file.originalname)}`;

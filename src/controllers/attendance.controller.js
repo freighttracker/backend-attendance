@@ -1741,6 +1741,27 @@ exports.correctAttendanceRecord = async (req, res) => {
             status
         }, req.user.id, reason);
 
+        // A direct admin correction overrides any employee request still
+        // pending for the same day - close them so approving one later
+        // can't silently undo this fix.
+        const dayStart = moment.tz(attendance.date, TZ).startOf('day');
+        const superseded = await AttendanceCorrectionRequest.updateMany(
+            {
+                user: attendance.user,
+                status: 'pending',
+                date: { $gte: dayStart.toDate(), $lte: moment(dayStart).endOf('day').toDate() }
+            },
+            {
+                status: 'rejected',
+                rejectionReason: 'Superseded by an admin correction',
+                approvedBy: req.user.id,
+                approvedAt: new Date()
+            }
+        );
+        if (superseded.modifiedCount) {
+            logger.info(`${superseded.modifiedCount} pending correction request(s) superseded by admin ${req.user.id}`);
+        }
+
         await Notification.create({
             user: attendance.user,
             title: 'Attendance Corrected',

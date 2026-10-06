@@ -20,7 +20,7 @@ const attachScope = (req, res, next) => {
 
     const role = req.user.role;
     if (SUPERADMIN_ROLES.includes(role)) {
-        
+
         // Full access by default. May optionally narrow via an explicit
         // query param (e.g. the admin hierarchy selector) - safe because a
         // superadmin is authorized to see any company/subcompany anyway.
@@ -59,18 +59,20 @@ const attachScope = (req, res, next) => {
 // company/subCompany fields (User, AttendanceRecord, and future modules as
 // they're migrated). A superadmin with no narrowing set returns {} (no
 // restriction); everyone else always contributes at least their companyId.
+
 const scopeFilter = (req) => {
 
     const filter = {};
     if (req.scope.companyId) filter.company = req.scope.companyId;
     if (req.scope.subCompanyId) filter.subCompany = req.scope.subCompanyId;
     return filter;
-};
+}; 
 
 // Throws-as-403 style guard: call after loading a record to confirm it
 // actually belongs to the caller's scope before returning/mutating it. Use
 // for single-record GET/PUT/DELETE routes where a Mongo filter alone isn't
 // already doing the job (e.g. findById lookups).
+
 const isInScope = (req, record) => {
     if (req.scope.isSuperAdmin && !req.scope.companyId && !req.scope.subCompanyId) return true;
     if (req.scope.companyId && String(record.company || '') !== String(req.scope.companyId)) return false;
@@ -83,6 +85,7 @@ const isInScope = (req, record) => {
 // (salary structure, attendance-by-employee, etc.) so they all agree on the
 // same rule: unrestricted for superadmin, otherwise the target user's own
 // company/subCompany must match the caller's scope.
+
 const canAccessUser = (req, targetUser) => {
     if (!req.scope || (!req.scope.companyId && !req.scope.subCompanyId)) return true;
     if (req.scope.companyId && String(targetUser.company || '') !== String(req.scope.companyId)) return false;

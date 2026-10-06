@@ -4,6 +4,9 @@ const { successResponse, errorResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 
 // Generate JWT Token
+
+
+
 const generateToken = (userId) => {
     return jwt.sign({ userId }, process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_EXPIRE || '7d'
@@ -11,11 +14,11 @@ const generateToken = (userId) => {
 };
 
 const generateRefreshToken = (userId) => {
+    
     return jwt.sign({ userId }, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_REFRESH_EXPIRE || '30d'
     });
 };
-
 // @desc    Register new user (Admin only)
 // @route   POST /api/auth/register
 // @access  Private/Admin
@@ -167,7 +170,7 @@ exports.refreshToken = async (req, res) => {
         const newRefreshToken = generateRefreshToken(user._id);
 
         await User.findByIdAndUpdate(user._id, { refreshToken: newRefreshToken });
-
+        
         return successResponse(res, {
             token: newToken,
             refreshToken: newRefreshToken

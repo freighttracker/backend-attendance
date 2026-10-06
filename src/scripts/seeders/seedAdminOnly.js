@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 require('dotenv').config();
-
 const connectDB = require('../../config/database');
+
 const {
     User, AttendanceRecord, AttendanceCorrectionRequest, EmployeeRule, AttendanceRule,
     LeaveRequest, LeaveBalance, LeaveType, SalaryStructure, SalarySlip, Payroll,

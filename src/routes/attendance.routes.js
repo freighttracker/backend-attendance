@@ -23,7 +23,10 @@ router.get('/all', authenticate, anyAdmin, attachScope, attendanceController.get
 // controllers' scope checks keep company/subcompany admins to their own staff.
 router.get('/corrections', authenticate, anyAdmin, attachScope, attendanceController.getCorrectionRequests);
 router.put('/corrections/:id', authenticate, anyAdmin, attachScope, attendanceController.handleCorrectionRequest);
-router.put('/correct', authenticate, anyAdmin, attachScope, attendanceController.correctAttendanceRecord);
+// Overtime is unpaid until an admin approves it here.
+router.get('/overtime', authenticate, anyAdmin, attachScope, attendanceController.getOvertimeRequests);
+router.put('/overtime/:id', authenticate, anyAdmin, attachScope, attendanceController.handleOvertimeRequest);
+router.put('/correct',authenticate, anyAdmin, attachScope, attendanceController.correctAttendanceRecord);
 router.post('/lock', authenticate, authorize('superadmin', 'admin'), attendanceController.lockAttendance);
 router.get('/report', authenticate, anyAdmin, attachScope, attendanceReportController.getMonthlyReport);
 router.get('/settings', authenticate, authorize('superadmin', 'admin'), attendanceController.getAttendanceSettings);

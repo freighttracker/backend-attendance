@@ -57,6 +57,27 @@ const attendanceRecordSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
+    // Overtime is only paid once an admin approves it. 'none' = no overtime
+    // on this day; 'pending' = overtime logged, awaiting review. Payroll and
+    // the salary estimate only ever use approvedOvertimeHours.
+    overtimeStatus: {
+        type: String,
+        enum: ['none', 'pending', 'approved', 'rejected'],
+        default: 'none'
+    },
+    approvedOvertimeHours: {
+        type: Number,
+        default: 0
+    },
+    overtimeReviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    overtimeReviewedAt: Date,
+    overtimeRemarks: {
+        type: String,
+        trim: true
+    },
     lateMinutes: {
         type: Number,
         default: 0
@@ -161,6 +182,18 @@ const attendanceRecordSchema = new mongoose.Schema({
     }
 }, {
     timestamps: true
+});
+
+// Any change to the day's measured overtime (checkout, correction) voids a
+// previous review - the new hours have to be approved again before they pay.
+attendanceRecordSchema.pre('save', function (next) {
+    if (this.isModified('overtimeHours') && !this.isModified('overtimeStatus')) {
+        this.overtimeStatus = this.overtimeHours > 0 ? 'pending' : 'none';
+        this.approvedOvertimeHours = 0;
+        this.overtimeReviewedBy = undefined;
+        this.overtimeReviewedAt = undefined;
+    }
+    next();
 });
 
 // Compound index to ensure one record per user per date

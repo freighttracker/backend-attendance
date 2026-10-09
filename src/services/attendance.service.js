@@ -9,6 +9,7 @@ const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
 const markMissedCheckoutsAsHalfDay = async (userId = null) => {
 
     const today = moment.tz(TZ).startOf('day').toDate();
+    
     const query = {
         date: { $lt: today },
         'checkIn.time': { $ne: null },

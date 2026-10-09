@@ -38,7 +38,7 @@ exports.createLoan = async (req, res) => {
     }
 };
 
-// @desc    Get all loans
+// @desc Get all loans
 // @route   GET /api/payroll/loans
 // @access  Private/Admin
 exports.getLoans = async (req, res) => {

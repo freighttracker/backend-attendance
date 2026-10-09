@@ -547,17 +547,23 @@ exports.createLeaveType = async (req, res) => {
 // @route   PUT /api/leaves/types/:id
 // @access  Private/Admin
 exports.updateLeaveType = async (req, res) => {
+
     try {
+
         const leaveType = await LeaveType.findByIdAndUpdate(
             req.params.id,
             req.body,
             { new: true, runValidators: true }
         );
+
         if (!leaveType) return errorResponse(res, 'Leave type not found', 404);
+        
         return successResponse(res, leaveType, 'Leave type updated');
+        
     } catch (error) {
         logger.error('Update leave type error:', error);
         return errorResponse(res, error.message, 500);
+
     }
 };
 

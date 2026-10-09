@@ -176,7 +176,7 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         AttendanceRecord.find({
             user: userId,
             date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() }
-        }),
+        }).sort({ isCorrected: 1, updatedAt: 1 }), // a corrected/latest record wins if a day has two
         getAttendanceTrackingStartDate()
     ]);
 
@@ -228,21 +228,37 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         holidays: 0,
         lateCount: 0,
         earlyLeaveCount: 0,
-        overtimeHours: 0
+        overtimeHours: 0,
+        // Only admin-approved overtime is payable; the rest is informational.
+        approvedOvertimeHours: 0,
+        pendingOvertimeHours: 0,
+        // Same counts restricted to days that have already happened (today
+        // included once it has a record), for mid-month to-date figures -
+        // attendance % and the running salary estimate. Payroll itself keeps
+        // using the full-month counts above.
+        workingDaysToDate: 0,
+        weeklyOffsToDate: 0,
+        holidaysToDate: 0,
+        paidLeaveDaysToDate: 0
     };
+    const todayStart = moment.tz(TZ).startOf('day');
 
     const cursor = monthStart.clone();
     while (cursor.isSameOrBefore(monthEnd, 'day')) {
         const dateStr = cursor.format('YYYY-MM-DD');
         const dayOfWeek = cursor.format('dddd').toLowerCase();
 
+        const isPastOrToday = cursor.isSameOrBefore(todayStart, 'day');
+
         if (weekendDaySet.has(dayOfWeek)) {
             summary.weeklyOffs += 1;
+            if (isPastOrToday) summary.weeklyOffsToDate += 1;
             cursor.add(1, 'day');
             continue;
         }
         if (holidayDateSet.has(dateStr)) {
             summary.holidays += 1;
+            if (isPastOrToday) summary.holidaysToDate += 1;
             cursor.add(1, 'day');
             continue;
         }
@@ -253,22 +269,36 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         // - treat it as a paid day off, same as the configured ones above.
         if (record && record.status === 'weekend') {
             summary.weeklyOffs += 1;
+            if (isPastOrToday) summary.weeklyOffsToDate += 1;
             cursor.add(1, 'day');
             continue;
         }
         if (record && record.status === 'holiday') {
             summary.holidays += 1;
+            if (isPastOrToday) summary.holidaysToDate += 1;
             cursor.add(1, 'day');
             continue;
         }
 
         summary.workingDays += 1;
         const leave = leaveByDate.get(dateStr);
+        // Today only counts as elapsed once there's something recorded for it.
+        const isElapsed = cursor.isBefore(todayStart, 'day') || (isPastOrToday && (record || leave));
+        if (isElapsed) summary.workingDaysToDate += 1;
+        if (isElapsed && leave && leave.isPaid && (!record || record.status === 'on_leave' || record.status === 'absent')) {
+            summary.paidLeaveDaysToDate += 1;
+        }
 
         if (record) {
             summary.lateCount += record.isLate ? 1 : 0;
             summary.earlyLeaveCount += record.isEarlyLeave ? 1 : 0;
             summary.overtimeHours += record.overtimeHours || 0;
+            if (record.overtimeStatus === 'approved') {
+                summary.approvedOvertimeHours += record.approvedOvertimeHours || 0;
+            } else if (record.overtimeStatus !== 'rejected' && record.overtimeHours > 0) {
+                // Includes legacy records from before overtime approval existed.
+                summary.pendingOvertimeHours += record.overtimeHours || 0;
+            }
 
             if (record.status === 'present' || record.status === 'wfh') {
                 summary.presentDays += 1;
@@ -317,6 +347,42 @@ const computeSalaryDays = (attendance) => round2(
     (attendance.holidays || 0) +
     (attendance.weeklyOffs || 0)
 );
+
+// Salary days earned so far this month - same rules as computeSalaryDays(),
+// but weekly offs/holidays/paid leave only once their date has passed, so a
+// mid-month estimate doesn't pay out days that haven't happened yet. For a
+// completed month this equals computeSalaryDays().
+const computeSalaryDaysToDate = (attendance) => round2(
+    (attendance.presentDays || 0) +
+    (attendance.halfDays || 0) * 0.5 +
+    (attendance.paidLeaveDaysToDate || 0) +
+    (attendance.holidaysToDate || 0) +
+    (attendance.weeklyOffsToDate || 0)
+);
+
+// Attendance % over the working days that have actually elapsed.
+const computeAttendancePct = (attendance) => {
+    const days = attendance.workingDaysToDate || 0;
+    if (days <= 0) return 0;
+    return round2(Math.min(((attendance.presentDays + attendance.halfDays * 0.5) / days) * 100, 100));
+};
+
+// Overtime pay for the month - only ever on admin-approved hours, never the
+// raw hours logged at checkout. Shared by calculateSalary() and the
+// attendance report's salary estimate so the two can't disagree.
+const computeOvertimeAmount = (overtimeConfig, basicSalary, attendance) => {
+    const hours = attendance.approvedOvertimeHours || 0;
+    if (!overtimeConfig || !overtimeConfig.isEnabled || hours <= 0) return 0;
+
+    let hourlyRate = 0;
+    if (overtimeConfig.rateType === 'fixedHourlyRate') {
+        hourlyRate = overtimeConfig.hourlyRate || 0;
+    } else {
+        const hourlyBasic = basicSalary / ((attendance.workingDays || 26) * 8);
+        hourlyRate = hourlyBasic * (overtimeConfig.rateMultiplier || 1.5);
+    }
+    return round2(hours * hourlyRate);
+};
 
 // ---------------------------------------------------------------------------
 // Ad-hoc earnings: approved, not-yet-applied bonuses/reimbursements for the
@@ -407,19 +473,9 @@ const calculateSalary = async (userId, month, year) => {
         pushEarning(`otherAllowance_${idx}`, item.name, resolveComponent(item, base));
     });
 
-    // Overtime
-    let overtimeAmount = 0;
-    if (structure.overtime && structure.overtime.isEnabled && attendance.overtimeHours > 0) {
-        let hourlyRate = 0;
-        if (structure.overtime.rateType === 'fixedHourlyRate') {
-            hourlyRate = structure.overtime.hourlyRate || 0;
-        } else {
-            const hourlyBasic = basicSalary / ((attendance.workingDays || 26) * 8);
-            hourlyRate = hourlyBasic * (structure.overtime.rateMultiplier || 1.5);
-        }
-        overtimeAmount = attendance.overtimeHours * hourlyRate;
-        pushEarning('overtime', 'Overtime', overtimeAmount);
-    }
+    // Overtime - admin-approved hours only
+    const overtimeAmount = computeOvertimeAmount(structure.overtime, basicSalary, attendance);
+    if (overtimeAmount > 0) pushEarning('overtime', 'Overtime', overtimeAmount);
 
     const reimbursementTotal = pendingReimbursements.reduce((sum, r) => sum + r.amount, 0);
     if (reimbursementTotal > 0) pushEarning('reimbursement', 'Reimbursements', reimbursementTotal);
@@ -578,8 +634,12 @@ module.exports = {
     getAttendanceTrackingStartDate,
     getCompanyProfile,
     getEffectiveStructure,
+    resolveComponent,
     getMonthlyAttendanceSummary,
     computeSalaryDays,
+    computeSalaryDaysToDate,
+    computeAttendancePct,
+    computeOvertimeAmount,
     calculateSalary,
     commitSlipSideEffects,
     releaseSlipSideEffects

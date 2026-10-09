@@ -76,6 +76,7 @@ exports.getAttendanceReport = async (req, res) => {
 // @access  Private/Admin
 exports.getLeaveReport = async (req, res) => {
     try {
+
         const { year, department, leaveType } = req.query;
         const currentYear = year || new Date().getFullYear();
 
@@ -134,7 +135,7 @@ exports.getLeaveReport = async (req, res) => {
             },
             { $sort: { employeeName: 1 } }
         );
-
+        
         const report = await LeaveRequest.aggregate(pipeline);
         return successResponse(res, report, 'Leave report generated');
     } catch (error) {
@@ -203,6 +204,7 @@ exports.getSalaryReport = async (req, res) => {
 // @route   GET /api/reports/monthly-summary
 // @access  Private/Admin
 exports.getMonthlySummary = async (req, res) => {
+    
     try {
         const { month, year } = req.query;
         const targetMonth = parseInt(month) || new Date().getMonth() + 1;
@@ -270,6 +272,7 @@ exports.getMonthlySummary = async (req, res) => {
             attendanceStats,
             leaveStats
         }, 'Monthly summary generated');
+        
     } catch (error) {
         logger.error('Monthly summary error:', error);
         return errorResponse(res, error.message, 500);
@@ -280,15 +283,19 @@ exports.getMonthlySummary = async (req, res) => {
 // @route   GET /api/reports/late-comers
 // @access  Private/Admin
 exports.getLateComersReport = async (req, res) => {
+
     try {
+
         const { startDate, endDate, department } = req.query;
 
         const query = { isLate: true };
         if (startDate && endDate) {
+
             query.date = {
                 $gte: moment(startDate).startOf('day').toDate(),
                 $lte: moment(endDate).endOf('day').toDate()
             };
+            
         }
 
         const pipeline = [

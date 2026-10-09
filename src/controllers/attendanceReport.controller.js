@@ -7,7 +7,7 @@ const WeekendConfig = require('../models/WeekendConfig');
 const AttendanceCorrectionRequest = require('../models/AttendanceCorrectionRequest');
 const SalarySlip = require('../models/SalarySlip');
 const SalaryStructure = require('../models/SalaryStructure');
-const { getMonthlyAttendanceSummary, computeSalaryDays, round2 } = require('../services/payroll.service');
+const { getMonthlyAttendanceSummary, computeSalaryDaysToDate, computeAttendancePct, computeOvertimeAmount, resolveComponent, round2 } = require('../services/payroll.service');
 const { scopeFilter, canAccessUser } = require('../middleware/scope.middleware');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { streamMonthlySummaryPDF } = require('../services/pdf.service');
@@ -55,8 +55,9 @@ async function getTodayStatusMap(userIds) {
 // back to an estimate derived from the active salary structure and this
 // month's salary-day count when no slip has been generated yet. `salarySource`
 // tells the frontend which one it's looking at so it can label it honestly.
-async function resolveSalaryFigures(userId, month, year, daysInMonth, salaryDays) {
-    
+async function resolveSalaryFigures(userId, month, year, attendance, salaryDays) {
+    const { daysInMonth } = attendance;
+
     const [slip, structure] = await Promise.all([
         SalarySlip.findOne({ user: userId, month, year }),
         SalaryStructure.findOne({ user: userId, isActive: true })
@@ -70,8 +71,16 @@ async function resolveSalaryFigures(userId, month, year, daysInMonth, salaryDays
         // Same per-day basis as payroll.service.js's calculateSalary() - gross
         // spread over calendar days in the month, not just working days -
         // so this estimate never drifts from what a real slip would show.
+        // Overtime is added only for hours an admin has approved.
         const perDay = structure.monthlyGrossSalary / daysInMonth;
-        return { grossSalary: structure.monthlyGrossSalary, netSalary: round2(perDay * salaryDays), salarySource: 'estimated' };
+        const basicSalary = resolveComponent(structure.earnings?.basicSalary, { monthlyGrossSalary: structure.monthlyGrossSalary });
+        const overtimeAmount = computeOvertimeAmount(structure.overtime, basicSalary, attendance);
+        return {
+            grossSalary: structure.monthlyGrossSalary,
+            netSalary: round2(perDay * salaryDays + overtimeAmount),
+            overtimeAmount,
+            salarySource: 'estimated'
+        };
     }
     return { grossSalary: null, netSalary: null, salarySource: 'unavailable' };
 }
@@ -79,11 +88,9 @@ async function resolveSalaryFigures(userId, month, year, daysInMonth, salaryDays
 async function buildEmployeeRow(user, month, year, todayStatus) {
 
     const attendance = await getMonthlyAttendanceSummary(user._id, month, year);
-    const salaryDays = computeSalaryDays(attendance);
-    const attendancePct = attendance.workingDays > 0
-        ? round2(((attendance.presentDays + attendance.halfDays * 0.5) / attendance.workingDays) * 100)
-        : 0;
-    const { grossSalary, netSalary, salarySource } = await resolveSalaryFigures(user._id, month, year, attendance.daysInMonth, salaryDays);
+    const salaryDays = computeSalaryDaysToDate(attendance);
+    const attendancePct = computeAttendancePct(attendance);
+    const { grossSalary, netSalary, salarySource } = await resolveSalaryFigures(user._id, month, year, attendance, salaryDays);
 
     return {
         id: user._id,
@@ -93,6 +100,7 @@ async function buildEmployeeRow(user, month, year, todayStatus) {
         designation: user.designation || null,
         daysInMonth: attendance.daysInMonth,
         workingDays: attendance.workingDays,
+        workingDaysToDate: attendance.workingDaysToDate,
         presentDays: attendance.presentDays,
         absentDays: attendance.absentDays,
         halfDays: attendance.halfDays,
@@ -103,6 +111,8 @@ async function buildEmployeeRow(user, month, year, todayStatus) {
         lateCount: attendance.lateCount,
         earlyLeaveCount: attendance.earlyLeaveCount,
         overtimeHours: round2(attendance.overtimeHours),
+        approvedOvertimeHours: round2(attendance.approvedOvertimeHours),
+        pendingOvertimeHours: round2(attendance.pendingOvertimeHours),
         attendancePct,
         salaryDays,
         grossSalary,
@@ -117,9 +127,10 @@ function buildSummary(rows) {
     const totalEmployees = rows.length;
     const sum = (key) => round2(rows.reduce((acc, r) => acc + (r[key] || 0), 0));
     const workingDays = rows[0]?.workingDays || 0;
+    const workingDaysToDate = rows[0]?.workingDaysToDate || 0;
     const presentEquivalent = rows.reduce((acc, r) => acc + r.presentDays + r.halfDays * 0.5, 0);
-    const attendancePercentage = workingDays > 0 && totalEmployees > 0
-        ? round2((presentEquivalent / (workingDays * totalEmployees)) * 100)
+    const attendancePercentage = workingDaysToDate > 0 && totalEmployees > 0
+        ? round2((presentEquivalent / (workingDaysToDate * totalEmployees)) * 100)
         : 0;
 
     return {
@@ -224,9 +235,12 @@ exports.getMonthlyReport = async (req, res) => {
 // @route   GET /api/attendance/report/employee/:id
 // @access  Private (self) / Private/Admin (any)
 exports.getEmployeeReport = async (req, res) => {
+
     try {
+
         const { id } = req.params;
         const isAdminTier = ADMIN_TIER_ROLES.includes(req.user.role);
+        
         if (!isAdminTier && req.user.id !== id) {
             return errorResponse(res, 'Not authorized', 403);
         }
@@ -243,11 +257,9 @@ exports.getEmployeeReport = async (req, res) => {
         const year = parseInt(req.query.year) || now.year();
 
         const attendance = await getMonthlyAttendanceSummary(id, month, year);
-        const salaryDays = computeSalaryDays(attendance);
-        const attendancePct = attendance.workingDays > 0
-            ? round2(((attendance.presentDays + attendance.halfDays * 0.5) / attendance.workingDays) * 100)
-            : 0;
-        const { netSalary } = await resolveSalaryFigures(id, month, year, attendance.daysInMonth, salaryDays);
+        const salaryDays = computeSalaryDaysToDate(attendance);
+        const attendancePct = computeAttendancePct(attendance);
+        const { netSalary, overtimeAmount } = await resolveSalaryFigures(id, month, year, attendance, salaryDays);
 
         return successResponse(res, {
             month,
@@ -270,10 +282,15 @@ exports.getEmployeeReport = async (req, res) => {
             lateCount: attendance.lateCount,
             earlyLeaveCount: attendance.earlyLeaveCount,
             overtimeHours: round2(attendance.overtimeHours),
+            approvedOvertimeHours: round2(attendance.approvedOvertimeHours),
+            pendingOvertimeHours: round2(attendance.pendingOvertimeHours),
             attendancePct,
             expectedSalaryDays: salaryDays,
+            overtimeAmount: overtimeAmount || 0,
             currentMonthSalaryEstimate: netSalary
         }, 'Employee attendance report retrieved');
+
+
     } catch (error) {
         logger.error('Get employee attendance report error:', error);
         return errorResponse(res, error.message, 500);
@@ -329,7 +346,9 @@ exports.getAttendanceCalendar = async (req, res) => {
                 startDate: { $lte: monthEnd.toDate() },
                 endDate: { $gte: monthStart.toDate() }
             }).populate('leaveType', 'name isPaid colorCode'),
-            AttendanceRecord.find({ user: id, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } }),
+            // Corrected, then newest, last - so if a day ever has two records
+            // the admin's correction wins in recordByDate below.
+            AttendanceRecord.find({ user: id, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } }).sort({ isCorrected: 1, updatedAt: 1 }),
             AttendanceCorrectionRequest.find({ user: id, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } })
                 .sort({ createdAt: 1 })
                 .select('date status requestedCheckIn requestedCheckOut reason rejectionReason overrideStatus')
@@ -376,6 +395,7 @@ exports.getAttendanceCalendar = async (req, res) => {
                     && cursor.isBefore(today, 'day') && ['present', 'wfh'].includes(status)
                     && !record.isStatusOverridden;
                 if (missedCheckout) status = 'half_day';
+                
                 extra = {
                     checkIn: record.checkIn?.time || null,
                     checkOut: record.checkOut?.time || null,
@@ -383,6 +403,8 @@ exports.getAttendanceCalendar = async (req, res) => {
                     workingMinutes: record.workingMinutes,
                     overtimeHours: record.overtimeHours,
                     overtimeMinutes: record.overtimeMinutes,
+                    overtimeStatus: record.overtimeHours > 0 && record.overtimeStatus === 'none' ? 'pending' : record.overtimeStatus,
+                    approvedOvertimeHours: record.approvedOvertimeHours,
                     isLate: record.isLate,
                     lateMinutes: record.lateMinutes,
                     isEarlyLeave: record.isEarlyLeave,
@@ -406,17 +428,17 @@ exports.getAttendanceCalendar = async (req, res) => {
                     correctionReason: record.correctionReason || null,
                     previousStatus: record.previousStatus || null
                 };
-            } else if (isWeekendDay) {
-                status = 'weekend';
-            } else if (holiday) {
-                status = 'holiday';
-            } else if (leaveType) {
-                status = 'on_leave';
-            } else if (cursor.isAfter(today)) {
-                status = 'upcoming';
-            } else {
-                status = 'absent';
-            }
+                } else if (isWeekendDay) {
+                    status = 'weekend';
+                } else if (holiday) {
+                    status = 'holiday';
+                } else if (leaveType) {
+                    status = 'on_leave';
+                } else if (cursor.isAfter(today)) {
+                    status = 'upcoming';
+                } else {
+                    status = 'absent';
+                }
 
             const correction = correctionByDate.get(dateKey);
 
@@ -468,6 +490,7 @@ exports.getAttendanceCalendar = async (req, res) => {
 // @access  Private/Admin
 exports.getAttendanceDashboard = async (req, res) => {
     try {
+
         const now = moment.tz(TZ);
         const month = parseInt(req.query.month) || (now.month() + 1);
         const year = parseInt(req.query.year) || now.year();
@@ -493,12 +516,12 @@ exports.getAttendanceDashboard = async (req, res) => {
         // Month-to-date figures reuse the same per-employee summary as the
         // monthly report, so the dashboard and report never disagree.
         const monthlySummaries = await Promise.all(employeeIds.map((id) => getMonthlyAttendanceSummary(id, month, year)));
-        const workingDays = monthlySummaries[0]?.workingDays || 0;
+        const workingDays = monthlySummaries[0]?.workingDaysToDate || 0;
         const presentEquivalent = monthlySummaries.reduce((sum, a) => sum + a.presentDays + a.halfDays * 0.5, 0);
         const monthlyAttendancePercentage = workingDays > 0 && totalEmployees > 0
             ? round2((presentEquivalent / (workingDays * totalEmployees)) * 100)
             : 0;
-        const payrollDays = round2(monthlySummaries.reduce((sum, a) => sum + computeSalaryDays(a), 0));
+        const payrollDays = round2(monthlySummaries.reduce((sum, a) => sum + computeSalaryDaysToDate(a), 0));
 
         return successResponse(res, {
             month,
@@ -516,6 +539,7 @@ exports.getAttendanceDashboard = async (req, res) => {
             totalWorkingHoursToday,
             payrollDays
         }, 'Attendance dashboard retrieved');
+        
     } catch (error) {
         logger.error('Get attendance dashboard error:', error);
         return errorResponse(res, error.message, 500);

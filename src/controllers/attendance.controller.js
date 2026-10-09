@@ -957,8 +957,6 @@
 //     }
 // };
 
-
-
 const moment = require('moment-timezone');
 const AttendanceRecord = require('../models/AttendanceRecord');
 const User = require('../models/User');
@@ -1002,6 +1000,7 @@ const FALLBACK_RULE = {
 
 // Get user's attendance rule
 const getUserRule = async (userId) => {
+    
     const employeeRule = await EmployeeRule.findOne({
         user: userId,
         effectiveFrom: { $lte: new Date() },
@@ -1009,7 +1008,7 @@ const getUserRule = async (userId) => {
     }).populate('rule');
 
     if (employeeRule) return employeeRule.rule;
-
+    
     const defaultRule = await AttendanceRule.findOne({ isDefault: true, isActive: true });
     return defaultRule || FALLBACK_RULE;
 };
@@ -1047,6 +1046,7 @@ const isOnApprovedLeave = async (userId, date) => {
 // Shared checkout math - used by the live checkout endpoint AND by admin
 // approval of a backfilled correction request, so the two paths can never
 // disagree on how a day's status/hours/flags are derived.
+
 const computeCheckoutOutcome = (rule, checkInTime, checkOutTime) => {
 
     const checkInMoment = moment(checkInTime);
@@ -1056,7 +1056,10 @@ const computeCheckoutOutcome = (rule, checkInTime, checkOutTime) => {
     const workingHours = Math.max(checkOutMoment.diff(checkInMoment, 'hours', true), 0);
     const workingMinutes = Math.max(checkOutMoment.diff(checkInMoment, 'minutes'), 0);
 
-    const overtimeHours = workingHours > rule.overtimeThreshold ? workingHours - rule.overtimeThreshold : 0;
+    // A missing/zero threshold would turn every worked hour into overtime, so
+    // fall back to the rule's full-day hours.
+    const overtimeThreshold = rule.overtimeThreshold > 0 ? rule.overtimeThreshold : (rule.fullDayHours || 8);
+    const overtimeHours = workingHours > overtimeThreshold ? workingHours - overtimeThreshold : 0;
 
     const isEarlyLeave = checkOutMoment.isBefore(officeEnd);
     const earlyLeaveMinutes = isEarlyLeave ? officeEnd.diff(checkOutMoment, 'minutes') : 0;
@@ -1067,6 +1070,7 @@ const computeCheckoutOutcome = (rule, checkInTime, checkOutTime) => {
     // rule for display/back-compat but absentThresholdHours now owns the
     // lower edge of the Half Day band, closing a gap where very short days
     // used to silently stay "present".)
+
     let status;
     if (workingHours < (rule.absentThresholdHours ?? 0)) {
         status = 'absent';
@@ -1097,6 +1101,25 @@ const computeCheckoutOutcome = (rule, checkInTime, checkOutTime) => {
 // etc.) that bypasses the hours-based ladder in computeCheckoutOutcome;
 // otherwise the outcome is recalculated from the (possibly corrected)
 // check-in/check-out times, exactly like a live checkout would.
+// Check-in stores a record's date as *server-local* midnight
+// (moment().startOf('day')), which on a UTC host is 00:00Z, while an
+// IST-midnight date is 18:30Z the day before. Looking a day up by exact
+// equality therefore misses the real record and the correction lands on a
+// duplicate. These two helpers keep every correction path on the same record.
+
+const toRecordDate = (date) =>
+    moment(moment.tz(date, TZ).format('YYYY-MM-DD'), 'YYYY-MM-DD').startOf('day').toDate();
+
+const findDayRecord = (userId, date) => {
+
+    const dayStart = moment.tz(date, TZ).startOf('day');
+    return AttendanceRecord.findOne({
+        user: userId,
+        date: { $gte: dayStart.toDate(), $lte: moment(dayStart).endOf('day').toDate() }
+    }).sort({ isCorrected: -1, updatedAt: -1 });
+
+};
+
 const applyAttendanceCorrection = async (attendance, { checkInTime, checkOutTime, status } = {}, adminId, reason) => {
 
     const previousStatus = attendance.status;
@@ -1481,7 +1504,7 @@ exports.requestCorrection = async (req, res) => {
                 return errorResponse(res, 'Cannot request correction for a future date', 400);
             }
 
-            attendance = await AttendanceRecord.findOne({ user: userId, date: recordDate });
+            attendance = await findDayRecord(userId, recordDate);
         }
 
         if (attendance && attendance.isLocked) {
@@ -1665,7 +1688,7 @@ exports.handleCorrectionRequest = async (req, res) => {
         if (status === 'approved') {
             let attendance = correctionRequest.attendanceRecord
                 ? await AttendanceRecord.findById(correctionRequest.attendanceRecord)
-                : await AttendanceRecord.findOne({ user: correctionRequest.user, date: correctionRequest.date });
+                : await findDayRecord(correctionRequest.user, correctionRequest.date);
 
             if (!attendance) {
                 attendance = new AttendanceRecord({
@@ -1736,10 +1759,9 @@ exports.correctAttendanceRecord = async (req, res) => {
             if (!userId || !date) {
                 return errorResponse(res, 'Provide attendanceRecordId, or both userId and date', 400);
             }
-            const recordDate = moment.tz(date, TZ).startOf('day').toDate();
-            attendance = await AttendanceRecord.findOne({ user: userId, date: recordDate });
+            attendance = await findDayRecord(userId, date);
             if (!attendance) {
-                attendance = new AttendanceRecord({ user: userId, date: recordDate, status: 'present' });
+                attendance = new AttendanceRecord({ user: userId, date: toRecordDate(date), status: 'present' });
             }
         }
 
@@ -1895,6 +1917,7 @@ const getOrCreateDefaultRule = async () => {
 // @route   GET /api/attendance/settings
 // @access  Private/Admin
 exports.getAttendanceSettings = async (req, res) => {
+
     try {
         const rule = await getOrCreateDefaultRule();
         return successResponse(res, {
@@ -1997,6 +2020,7 @@ exports.getEmployeeAttendance = async (req, res) => {
             total,
             totalPages: Math.ceil(total / parseInt(limit))
         });
+        
     } catch (error) {
         logger.error('Get employee attendance error:', error);
         return errorResponse(res, error.message, 500);
@@ -2004,4 +2028,117 @@ exports.getEmployeeAttendance = async (req, res) => {
 };
 
 // Exported so a nightly cron job can call it (see server/app file).
+// @desc    List days with overtime for admin review (default: pending)
+// @route   GET /api/attendance/overtime
+// @access  Private/Admin
+exports.getOvertimeRequests = async (req, res) => {
+    try {
+        const { status = 'pending', userId, month, year, page = 1, limit = 20 } = req.query;
+
+        const query = { overtimeHours: { $gt: 0 } };
+        if (status === 'pending') {
+            // Legacy records predate overtimeStatus and still need a review.
+            query.overtimeStatus = { $nin: ['approved', 'rejected'] };
+        } else if (status !== 'all') {
+            query.overtimeStatus = status;
+        }
+
+        if (month && year) {
+            const monthStart = moment.tz([parseInt(year), parseInt(month) - 1, 1], TZ).startOf('day');
+            query.date = { $gte: monthStart.toDate(), $lte: moment(monthStart).endOf('month').toDate() };
+        }
+
+        const scope = scopeFilter(req);
+        if (Object.keys(scope).length) {
+            const scopedIds = await User.find(scope).distinct('_id');
+            query.user = userId
+                ? (scopedIds.some((id) => String(id) === String(userId)) ? userId : null)
+                : { $in: scopedIds };
+        } else if (userId) {
+            query.user = userId;
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const [total, records] = await Promise.all([
+            AttendanceRecord.countDocuments(query),
+            AttendanceRecord.find(query)
+                .select('user date checkIn.time checkOut.time workingHours overtimeHours overtimeStatus approvedOvertimeHours overtimeReviewedBy overtimeReviewedAt overtimeRemarks')
+                .populate('user', 'firstName lastName employeeCode')
+                .sort({ date: -1 })
+                .skip(skip)
+                .limit(parseInt(limit))
+        ]);
+
+        return paginatedResponse(res, records, {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total,
+            totalPages: Math.ceil(total / parseInt(limit))
+        });
+    } catch (error) {
+        logger.error('Get overtime requests error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    Approve/Reject a day's overtime. Only approved hours are paid.
+//          `approvedHours` (optional) lets the admin approve less than logged.
+// @route   PUT /api/attendance/overtime/:id
+// @access  Private/Admin
+exports.handleOvertimeRequest = async (req, res) => {
+    try {
+        const { status, approvedHours, remarks } = req.body;
+        if (!['approved', 'rejected'].includes(status)) {
+            return errorResponse(res, 'Status must be either approved or rejected', 400);
+        }
+
+        const attendance = await AttendanceRecord.findById(req.params.id);
+        if (!attendance) return errorResponse(res, 'Attendance record not found', 404);
+        if (!(attendance.overtimeHours > 0)) {
+            return errorResponse(res, 'This day has no overtime to review', 400);
+        }
+        if (attendance.isLocked) {
+            return errorResponse(res, 'Attendance for this period is locked', 400);
+        }
+
+        const employee = await User.findById(attendance.user).select('company subCompany');
+        if (!employee || !canAccessUser(req, employee)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+
+        let hours = 0;
+        if (status === 'approved') {
+            hours = approvedHours !== undefined && approvedHours !== null && approvedHours !== ''
+                ? Number(approvedHours)
+                : attendance.overtimeHours;
+            if (!Number.isFinite(hours) || hours <= 0 || hours > attendance.overtimeHours) {
+                return errorResponse(res, `approvedHours must be between 0 and ${attendance.overtimeHours}`, 400);
+            }
+        }
+
+        attendance.overtimeStatus = status;
+        attendance.approvedOvertimeHours = parseFloat(hours.toFixed(2));
+        attendance.overtimeReviewedBy = req.user.id;
+        attendance.overtimeReviewedAt = new Date();
+        attendance.overtimeRemarks = remarks;
+        await attendance.save();
+
+        await Notification.create({
+            user: attendance.user,
+            title: `Overtime ${status === 'approved' ? 'Approved' : 'Rejected'}`,
+            message: status === 'approved'
+                ? `${attendance.approvedOvertimeHours}h overtime on ${moment.tz(attendance.date, TZ).format('DD MMM YYYY')} has been approved.`
+                : `Overtime on ${moment.tz(attendance.date, TZ).format('DD MMM YYYY')} was rejected.${remarks ? ` Reason: ${remarks}` : ''}`,
+            type: status === 'approved' ? 'success' : 'error',
+            actionUrl: '/attendance/history'
+        });
+
+        logger.info(`Overtime ${status} for record ${attendance._id} by admin ${req.user.id}`);
+        return successResponse(res, attendance, `Overtime ${status}`);
+    } catch (error) {
+        logger.error('Handle overtime error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
 exports.markMissedCheckoutsAsHalfDay = markMissedCheckoutsAsHalfDay;

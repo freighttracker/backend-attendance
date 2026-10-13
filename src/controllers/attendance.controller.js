@@ -1171,7 +1171,9 @@ const applyAttendanceCorrection = async (attendance, { checkInTime, checkOutTime
 // @route   POST /api/attendance/check-in
 // @access  Private
 exports.checkIn = async (req, res) => {
+
     try {
+        
         const { location, latitude, longitude, device, photoUrl } = req.body;
         const userId = req.user.id;
         const today = moment().startOf('day').toDate();

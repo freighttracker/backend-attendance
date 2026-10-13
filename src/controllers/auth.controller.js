@@ -5,8 +5,6 @@ const { logger } = require('../utils/logger');
 
 // Generate JWT Token
 
-
-
 const generateToken = (userId) => {
     return jwt.sign({ userId }, process.env.JWT_SECRET, {
         expiresIn: process.env.JWT_EXPIRE || '7d'
@@ -148,7 +146,7 @@ exports.login = async (req, res) => {
     }
 };
 
-// @desc    Refresh token
+// @desc    Refresh token 
 // @route   POST /api/auth/refresh
 // @access  Public
 exports.refreshToken = async (req, res) => {

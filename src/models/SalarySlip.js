@@ -85,7 +85,9 @@ const salarySlipSchema = new mongoose.Schema({
         holidays: { type: Number, default: 0 },
         lateCount: { type: Number, default: 0 },
         lateDeductionUnits: { type: Number, default: 0 }, // in equivalent days
-        overtimeHours: { type: Number, default: 0 }
+        overtimeHours: { type: Number, default: 0 },
+        approvedOvertimeHours: { type: Number, default: 0 },
+        notEmployedDays: { type: Number, default: 0 } // days after last working day
     },
 
     earnings: { type: [lineItemSchema], default: [] },

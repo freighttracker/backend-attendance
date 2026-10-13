@@ -12,6 +12,7 @@ const { scopeFilter, canAccessUser } = require('../middleware/scope.middleware')
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { streamMonthlySummaryPDF } = require('../services/pdf.service');
 const { logger } = require('../utils/logger');
+const { monthStartUTC, workedSince } = require('../utils/employeeStatus');
 
 const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
 const ADMIN_TIER_ROLES = ['superadmin', 'admin', 'company_admin', 'subcompany_admin'];
@@ -24,6 +25,7 @@ function fullName(user) {
 // large filtered employee list.
 
 async function getTodayStatusMap(userIds) {
+
     const todayStart = moment.tz(TZ).startOf('day');
     const todayEnd = moment(todayStart).endOf('day');
     const dayOfWeek = todayStart.format('dddd').toLowerCase();
@@ -46,6 +48,7 @@ async function getTodayStatusMap(userIds) {
 
     const map = new Map(userIds.map((id) => [String(id), fallback]));
     leaves.forEach((l) => map.set(String(l.user), 'on_leave'));
+
     // An actual attendance record for today always wins over the defaults.
     records.forEach((r) => map.set(String(r.user), r.status));
     return map;
@@ -154,12 +157,15 @@ function buildSummary(rows) {
 // Shared by the JSON report and its PDF export so both always show the same
 // employees and figures for a given set of filters.
 async function loadMonthlyRows(req) {
+
     const now = moment.tz(TZ);
     const month = parseInt(req.query.month) || (now.month() + 1);
     const year = parseInt(req.query.year) || now.year();
     const { department, designation, userId, search, status } = req.query;
 
-    const userFilter = { role: { $ne: 'admin' }, ...scopeFilter(req) };
+    // Leavers stay on the report for the months they worked, and drop off
+    // every month after their leaving date.
+    const userFilter = { role: { $ne: 'admin' }, ...workedSince(monthStartUTC(month, year)), ...scopeFilter(req) };
     if (department) userFilter.department = department;
     if (designation) userFilter.designation = designation;
     if (userId) userFilter._id = userId;
@@ -206,6 +212,7 @@ exports.exportMonthlyReportPdf = async (req, res) => {
 exports.getMonthlyReport = async (req, res) => {
 
     try {
+
         const page = Math.max(parseInt(req.query.page) || 1, 1);
         const limit = Math.max(parseInt(req.query.limit) || 20, 1);
 
@@ -213,7 +220,8 @@ exports.getMonthlyReport = async (req, res) => {
         // current page, so every matching employee's monthly summary is computed
         // first and only sliced into a page afterwards. Fine at typical HRMS
         // headcounts; if this ever needs to scale to thousands of employees,
-        // switch to a single aggregation pipeline instead of per-employee calls.
+        // switch to a single aggregation pipeline instead of per-employee calls.]
+
         const { month, year, rows } = await loadMonthlyRows(req);
         const summary = buildSummary(rows);
 
@@ -246,6 +254,7 @@ exports.getEmployeeReport = async (req, res) => {
         }
 
         const user = await User.findById(id).select('firstName lastName employeeCode department designation company subCompany');
+        
         if (!user) return errorResponse(res, 'Employee not found', 404);
 
         if (isAdminTier && req.user.id !== id && req.scope && !canAccessUser(req, user)) {
@@ -495,7 +504,7 @@ exports.getAttendanceDashboard = async (req, res) => {
         const month = parseInt(req.query.month) || (now.month() + 1);
         const year = parseInt(req.query.year) || now.year();
 
-        const employees = await User.find({ role: { $ne: 'admin' }, ...scopeFilter(req) }).select('_id');
+        const employees = await User.find({ role: { $ne: 'admin' }, isActive: true, ...scopeFilter(req) }).select('_id');
         const totalEmployees = employees.length;
         const employeeIds = employees.map((e) => e._id);
 

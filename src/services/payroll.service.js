@@ -13,6 +13,7 @@ const Loan = require('../models/Loan');
 const AdvanceSalary = require('../models/AdvanceSalary');
 const { markMissedCheckoutsAsHalfDay } = require('./attendance.service');
 const { logger } = require('../utils/logger');
+const { lastWorkingDayStr } = require('../utils/employeeStatus');
 
 const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -163,7 +164,7 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
     const today = moment.tz(TZ).endOf('day');
     const daysInMonth = monthStart.daysInMonth();
 
-    const [weekendConfigs, holidays, leaveRequests, attendanceRecords, trackingStartDate] = await Promise.all([
+    const [weekendConfigs, holidays, leaveRequests, attendanceRecords, trackingStartDate, employee] = await Promise.all([
         WeekendConfig.find({ isWeekend: true, isActive: true }),
         Holiday.find({ isActive: true, date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() } }),
         LeaveRequest.find({
@@ -177,8 +178,13 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
             user: userId,
             date: { $gte: monthStart.toDate(), $lte: monthEnd.toDate() }
         }).sort({ isCorrected: 1, updatedAt: 1 }), // a corrected/latest record wins if a day has two
-        getAttendanceTrackingStartDate()
+        getAttendanceTrackingStartDate(),
+        User.findById(userId).select('isActive leftAt')
     ]);
+
+    // Set only for an employee who has left: nothing after this day is
+    // payable or counted as attendance/absence.
+    const lastDayStr = lastWorkingDayStr(employee);
 
     const weekendDaySet = new Set(
         weekendConfigs.length > 0
@@ -239,7 +245,10 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         workingDaysToDate: 0,
         weeklyOffsToDate: 0,
         holidaysToDate: 0,
-        paidLeaveDaysToDate: 0
+        paidLeaveDaysToDate: 0,
+        // Calendar days after the employee's last working day - not paid
+        // (not even weekends/holidays) and not counted as absence either.
+        notEmployedDays: 0
     };
     const todayStart = moment.tz(TZ).startOf('day');
 
@@ -247,6 +256,12 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
     while (cursor.isSameOrBefore(monthEnd, 'day')) {
         const dateStr = cursor.format('YYYY-MM-DD');
         const dayOfWeek = cursor.format('dddd').toLowerCase();
+
+        if (lastDayStr && dateStr > lastDayStr) {
+            summary.notEmployedDays += 1;
+            cursor.add(1, 'day');
+            continue;
+        }
 
         const isPastOrToday = cursor.isSameOrBefore(todayStart, 'day');
 
@@ -507,6 +522,9 @@ const calculateSalary = async (userId, month, year) => {
 
     const halfDayDeductionAmount = (perDaySalary / 2) * attendance.halfDays;
     pushDeduction('halfDayDeduction', 'Half Day Deduction', halfDayDeductionAmount);
+
+    // Final month of someone who left: pay stops at the last working day.
+    pushDeduction('exitProration', 'Days After Last Working Day', perDaySalary * (attendance.notEmployedDays || 0));
 
     const lateTier = [...latePolicy]
         .sort((a, b) => a.lateCount - b.lateCount)

@@ -12,6 +12,7 @@ const { calculateSalary, commitSlipSideEffects, releaseSlipSideEffects, round2 }
 const { generateSalarySlipPDF } = require('../services/pdf.service');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
+const { monthStartUTC, workedSince, hadLeftBefore } = require('../utils/employeeStatus');
 
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const PRESENT_STATUSES = ['present', 'half_day', 'wfh'];
@@ -134,6 +135,9 @@ exports.generateSingleEmployeeSalary = async (req, res) => {
 
         const user = await User.findById(userId);
         if (!user) return errorResponse(res, 'Employee not found', 404);
+        if (hadLeftBefore(user, monthStartUTC(month, year))) {
+            return errorResponse(res, 'This employee had already left before this month', 400);
+        }
 
         const slip = await runGenerateForUser(userId, month, year, req.user.id);
         const totals = buildPayrollTotals([slip]);
@@ -196,7 +200,7 @@ exports.generateDepartmentSalary = async (req, res) => {
         const { department, month, year } = req.body;
         if (!department || !month || !year) return errorResponse(res, 'department, month and year are required', 400);
 
-        const users = await User.find({ department, isActive: true, role: { $ne: 'admin' } });
+        const users = await User.find({ department, role: { $ne: 'admin' }, ...workedSince(monthStartUTC(month, year)) });
         if (users.length === 0) return errorResponse(res, 'No active employees found in this department', 404);
 
         return await generateForUserList(req, res, users, { scope: 'department', department });
@@ -214,7 +218,9 @@ exports.generateCompanySalary = async (req, res) => {
         const { month, year, userIds } = req.body;
         if (!month || !year) return errorResponse(res, 'month and year are required', 400);
 
-        const query = { isActive: true, role: { $ne: 'admin' } };
+        // Anyone who left during (or after) this month still gets their slip
+        // for it; anyone who left earlier is skipped.
+        const query = { role: { $ne: 'admin' }, ...workedSince(monthStartUTC(month, year)) };
         if (Array.isArray(userIds) && userIds.length > 0) query._id = { $in: userIds };
 
         const users = await User.find(query);

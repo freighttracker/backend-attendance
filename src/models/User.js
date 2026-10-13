@@ -153,6 +153,27 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    // Set when an admin marks the employee as left (isActive goes false at
+    // the same time); cleared again if they rejoin.
+    leftAt: {
+        type: Date,
+        default: null
+    },
+    leftReason: {
+        type: String,
+        trim: true,
+        default: null
+    },
+    exitType: {
+        type: String,
+        enum: ['resigned', 'terminated', 'absconded', 'contract_ended', 'retired', 'other', null],
+        default: null
+    },
+    leftMarkedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
     isVerified: {
         type: Boolean,
         default: false

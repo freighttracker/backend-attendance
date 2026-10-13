@@ -5,6 +5,10 @@ const LeaveType = require('../models/LeaveType');
 const { scopeFilter, canAccessUser } = require('../middleware/scope.middleware');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
+const { workedSince } = require('../utils/employeeStatus');
+const { closeOpenItemsOnExit, buildExitSummary } = require('../services/employeeExit.service');
+
+const EXIT_TYPES = ['resigned', 'terminated', 'absconded', 'contract_ended', 'retired', 'other'];
 const xlsx = require('xlsx');
 const fs = require('fs');
 
@@ -25,7 +29,7 @@ function normalizeSalaryPayload(body) {
 // @access  Private/Admin
 exports.getAllUsers = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, department, role, isActive } = req.query;
+        const { page = 1, limit = 10, search, department, role, isActive, activeFrom } = req.query;
         // req.scope is set by attachScope from the caller's OWN user record -
         // a company_admin/subcompany_admin can never see past it regardless
         // of what's in the query string.
@@ -41,7 +45,17 @@ exports.getAllUsers = async (req, res) => {
         }
         if (department) query.department = department;
         if (role) query.role = role;
-        if (isActive !== undefined) query.isActive = isActive === 'true';
+        // activeFrom (YYYY-MM-DD) is for month-based screens: current employees
+        // plus anyone who left on/after that date, so a leaver still shows for
+        // the months they worked. An unparseable date falls back to active-only.
+        const activeFromDate = activeFrom ? new Date(activeFrom) : null;
+        if (activeFromDate && !Number.isNaN(activeFromDate.getTime())) {
+            Object.assign(query, workedSince(activeFromDate));
+        } else if (activeFrom) {
+            query.isActive = true;
+        } else if (isActive !== undefined) {
+            query.isActive = isActive === 'true';
+        }
 
         const skip = (parseInt(page) - 1) * parseInt(limit);
         const total = await User.countDocuments(query);
@@ -191,7 +205,7 @@ exports.deleteUser = async (req, res) => {
 
         const user = await User.findByIdAndUpdate(
             req.params.id,
-            { isActive: false },
+            { isActive: false, leftAt: existing.leftAt || new Date() },
             { new: true }
         );
 
@@ -199,6 +213,122 @@ exports.deleteUser = async (req, res) => {
         return successResponse(res, null, 'Employee deactivated successfully');
     } catch (error) {
         logger.error('Delete user error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    Mark an employee as left (deactivate, keeping all their records)
+// @route   PUT /api/users/:id/left
+// @access  Private/Admin
+exports.markUserLeft = async (req, res) => {
+    try {
+        const existing = await User.findById(req.params.id);
+        if (!existing) {
+            return errorResponse(res, 'User not found', 404);
+        }
+        if (req.scope && !req.scope.isSuperAdmin && !canAccessUser(req, existing)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+        if (String(existing._id) === req.user.id) {
+            return errorResponse(res, 'You cannot mark yourself as left', 400);
+        }
+
+        const { leavingDate, reason, exitType } = req.body;
+        if (exitType && !EXIT_TYPES.includes(exitType)) {
+            return errorResponse(res, `exitType must be one of: ${EXIT_TYPES.join(', ')}`, 400);
+        }
+        const leftAt = leavingDate ? new Date(leavingDate) : new Date();
+        if (Number.isNaN(leftAt.getTime())) {
+            return errorResponse(res, 'Leaving date is not a valid date', 400);
+        }
+        // The account is deactivated immediately, so a future last working
+        // day would lock the employee out early. A day of slack covers the
+        // admin's timezone being ahead of the server's.
+        if (leftAt.getTime() > Date.now() + 24 * 60 * 60 * 1000) {
+            return errorResponse(res, 'Leaving date cannot be in the future', 400);
+        }
+        if (existing.joiningDate && leftAt < existing.joiningDate) {
+            return errorResponse(res, 'Leaving date cannot be before the joining date', 400);
+        }
+
+        const user = await User.findByIdAndUpdate(
+            req.params.id,
+            {
+                isActive: false,
+                leftAt,
+                leftReason: reason ? String(reason).trim() : null,
+                exitType: exitType || null,
+                leftMarkedBy: req.user.id
+            },
+            { new: true }
+        ).select('-password -refreshToken');
+
+        // Pending leave is cancelled and the login session ended; every
+        // past record (attendance, leave, salary) is kept as-is.
+        const cleanup = await closeOpenItemsOnExit(user, leftAt);
+
+        logger.info(`User marked as left: ${user.email} by ${req.user.email}`);
+        return successResponse(res, { ...user.toObject(), cleanup }, 'Employee marked as left');
+    } catch (error) {
+        logger.error('Mark user left error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    Exit / full-and-final summary for one employee: dues to recover,
+//          amounts still payable, open requests and final-month pay status.
+//          Works before exit too (as a preview of what marking left will do).
+// @route   GET /api/users/:id/exit-summary
+// @access  Private/Admin
+exports.getExitSummary = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            return errorResponse(res, 'User not found', 404);
+        }
+        if (req.scope && !req.scope.isSuperAdmin && !canAccessUser(req, user)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+
+        let previewDate = null;
+        if (req.query.leavingDate) {
+            previewDate = new Date(req.query.leavingDate);
+            if (Number.isNaN(previewDate.getTime())) {
+                return errorResponse(res, 'Leaving date is not a valid date', 400);
+            }
+        }
+
+        const summary = await buildExitSummary(user, previewDate);
+        return successResponse(res, summary, 'Exit summary retrieved');
+    } catch (error) {
+        logger.error('Get exit summary error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    Bring back an employee who had left
+// @route   PUT /api/users/:id/rejoin
+// @access  Private/Admin
+exports.rejoinUser = async (req, res) => {
+    try {
+        const existing = await User.findById(req.params.id);
+        if (!existing) {
+            return errorResponse(res, 'User not found', 404);
+        }
+        if (req.scope && !req.scope.isSuperAdmin && !canAccessUser(req, existing)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+
+        const user = await User.findByIdAndUpdate(
+            req.params.id,
+            { isActive: true, leftAt: null, leftReason: null, exitType: null, leftMarkedBy: null },
+            { new: true }
+        ).select('-password -refreshToken');
+
+        logger.info(`User rejoined: ${user.email} by ${req.user.email}`);
+        return successResponse(res, user, 'Employee is active again');
+    } catch (error) {
+        logger.error('Rejoin user error:', error);
         return errorResponse(res, error.message, 500);
     }
 };

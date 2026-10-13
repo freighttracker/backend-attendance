@@ -24,5 +24,8 @@ router.post('/avatar', authenticate, upload.single('avatar'), userController.upl
 router.get('/:id', authenticate, attachScope, userController.getUser);
 router.put('/:id', authenticate, anyAdmin, attachScope, userController.updateUser);
 router.delete('/:id', authenticate, anyAdmin, attachScope, userController.deleteUser);
+router.get('/:id/exit-summary', authenticate, anyAdmin, attachScope, userController.getExitSummary);
+router.put('/:id/left', authenticate, anyAdmin, attachScope, userController.markUserLeft);
+router.put('/:id/rejoin', authenticate, anyAdmin, attachScope, userController.rejoinUser);
 
 module.exports = router;

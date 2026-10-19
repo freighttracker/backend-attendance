@@ -1,12 +1,73 @@
 const fs = require('fs');
 const path = require('path');
+const moment = require('moment-timezone');
+const mongoose = require('mongoose');
 const SalarySlip = require('../models/SalarySlip');
+const User = require('../models/User');
 const { scopeFilter, SUPERADMIN_ROLES } = require('../middleware/scope.middleware');
 const { runGenerateForUser } = require('./payroll.controller');
 const { generateSalarySlipPDF } = require('../services/pdf.service');
 const { sendSalarySlipEmail } = require('../services/email.service');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
+
+const TZ = process.env.TIMEZONE || 'Asia/Kolkata';
+// Never reach further back than this when filling in missing months, so an
+// employee with an old joining date doesn't get a year of empty slips.
+const MAX_BACKFILL_MONTHS = 12;
+// userId -> in-flight backfill, so parallel requests for the same employee
+// (history + selected month) wait on one run instead of racing duplicates.
+const backfillsInFlight = new Map();
+
+// Generates a slip for every fully elapsed month the employee worked that
+// has none yet - e.g. a skipped August between July and September. Months
+// are filled from the earliest existing slip (or the joining month when
+// there are none) up to last month, or the month they left.
+const backfillMissingSlips = async (req, userId) => {
+    const user = await User.findOne({ _id: userId, ...scopeFilter(req) })
+        .select('role joiningDate createdAt isActive leftAt')
+        .lean();
+    if (!user || SUPERADMIN_ROLES.includes(user.role)) return;
+
+    const existing = await SalarySlip.find({ user: userId }).select('month year').lean();
+    const have = new Set(existing.map((s) => `${s.year}-${s.month}`));
+
+    const lastElapsed = moment.tz(TZ).startOf('month').subtract(1, 'month');
+    let end = lastElapsed;
+    if (!user.isActive && user.leftAt) {
+        const leftMonth = moment.tz(user.leftAt, TZ).startOf('month');
+        if (leftMonth.isBefore(end)) end = leftMonth;
+    }
+
+    const earliestSlip = existing
+        .map((s) => moment.tz([s.year, s.month - 1, 1], TZ))
+        .sort((a, b) => a - b)[0];
+    let start = earliestSlip || moment.tz(user.joiningDate || user.createdAt, TZ).startOf('month');
+    const floor = lastElapsed.clone().subtract(MAX_BACKFILL_MONTHS - 1, 'months');
+    if (start.isBefore(floor)) start = floor;
+
+    for (const m = start.clone(); !m.isAfter(end); m.add(1, 'month')) {
+        const month = m.month() + 1;
+        const year = m.year();
+        if (have.has(`${year}-${month}`)) continue;
+        try {
+            await runGenerateForUser(userId, month, year, req.user.id);
+            logger.info(`Auto-generated missing salary slip for ${userId} - ${month}/${year}`);
+        } catch (err) {
+            logger.warn(`Could not auto-generate salary slip for ${userId} - ${month}/${year}: ${err.message}`);
+        }
+    }
+};
+
+const ensureSlipsGenerated = (req, userId) => {
+    if (!backfillsInFlight.has(userId)) {
+        const run = backfillMissingSlips(req, userId)
+            .catch((err) => logger.error('Salary slip backfill error:', err))
+            .finally(() => backfillsInFlight.delete(userId));
+        backfillsInFlight.set(userId, run);
+    }
+    return backfillsInFlight.get(userId);
+};
 
 // @desc    Get my salary slips
 // @route   GET /api/salary/my-slips
@@ -46,6 +107,9 @@ exports.getMySalarySlips = async (req, res) => {
 exports.getAllSalarySlips = async (req, res) => {
     try {
         const { page = 1, limit = 20, userId, month, year, status } = req.query;
+
+        // Looking at one employee: make sure no past month is missing first.
+        if (userId && mongoose.isValidObjectId(userId)) await ensureSlipsGenerated(req, String(userId));
 
         const query = { ...scopeFilter(req) };
         if (userId) query.user = userId;

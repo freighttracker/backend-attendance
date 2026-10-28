@@ -1,6 +1,8 @@
 ﻿const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/user.controller');
+const officeAssignmentController = require('../controllers/officeAssignment.controller');
+const { requireGeoPermission } = require('../services/geoAccess.service');
 const { authenticate, authorize } = require('../middleware/auth.middleware');
 const { attachScope } = require('../middleware/scope.middleware');
 const upload = require('../middleware/upload.middleware');
@@ -27,5 +29,8 @@ router.delete('/:id', authenticate, anyAdmin, attachScope, userController.delete
 router.get('/:id/exit-summary', authenticate, anyAdmin, attachScope, userController.getExitSummary);
 router.put('/:id/left', authenticate, anyAdmin, attachScope, userController.markUserLeft);
 router.put('/:id/rejoin', authenticate, anyAdmin, attachScope, userController.rejoinUser);
+// Office assignments for GPS attendance - readable by the employee themself.
+router.get('/:id/office-assignments', authenticate, attachScope, officeAssignmentController.getAssignments);
+router.put('/:id/office-assignments', authenticate, anyAdmin, attachScope, requireGeoPermission('canManageAssignments'), officeAssignmentController.setAssignments);
 
 module.exports = router;

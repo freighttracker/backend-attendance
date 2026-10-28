@@ -971,6 +971,9 @@ const { scopeFilter, canAccessUser } = require('../middleware/scope.middleware')
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 const { markMissedCheckoutsAsHalfDay } = require('../services/attendance.service');
+const { refreshSlipAfterAttendanceChange } = require('./payroll.controller');
+const { evaluatePunch, sendGeoRejection, pickPunchLocation, getGeoContextForUser } = require('../services/geoAttendance.service');
+const AuditLog = require('../models/AuditLog');
 
 // Matches payroll.service.js's TZ - the frontend sends requestedCheckIn/
 // requestedCheckOut as naive "YYYY-MM-DDTHH:mm:ss" strings with no offset
@@ -1120,10 +1123,18 @@ const findDayRecord = (userId, date) => {
 
 };
 
+const isFullDayStatus = (status) => status === 'present' || status === 'wfh';
+
 const applyAttendanceCorrection = async (attendance, { checkInTime, checkOutTime, status } = {}, adminId, reason) => {
 
     const previousStatus = attendance.status;
-    
+    const before = {
+        checkInTime: attendance.checkIn.time || null,
+        checkOutTime: attendance.checkOut.time || null,
+        status: attendance.status,
+        workingHours: attendance.workingHours
+    };
+
     if (checkInTime) attendance.checkIn.time = checkInTime;
     if (checkOutTime) attendance.checkOut.time = checkOutTime;
 
@@ -1131,10 +1142,10 @@ const applyAttendanceCorrection = async (attendance, { checkInTime, checkOutTime
         attendance.status = status;
         attendance.isHalfDay = status === 'half_day';
         attendance.isAbsent = status === 'absent';
-    } else if (attendance.checkIn.time && attendance.checkOut.time) {
+    } else if (attendance.checkIn.time   && attendance.checkOut.time) {
+        
         const rule = await getUserRule(attendance.user);
         const outcome = computeCheckoutOutcome(rule, attendance.checkIn.time, attendance.checkOut.time);
-
         attendance.workingHours = outcome.workingHours;
         attendance.workingMinutes = outcome.workingMinutes;
         attendance.overtimeHours = outcome.overtimeHours;
@@ -1154,6 +1165,20 @@ const applyAttendanceCorrection = async (attendance, { checkInTime, checkOutTime
         attendance.isAbsent = false;
     }
 
+    // An admin approving the day as a full day also excuses its late mark and
+    // early leave - otherwise the original (pre-correction) late flag keeps
+    // counting toward the payroll late-deduction policy.
+    if (isFullDayStatus(attendance.status)) {
+        if (attendance.isLate && attendance.lateStatus !== 'approved') {
+            attendance.lateStatus = 'approved';
+            attendance.lateReviewedBy = adminId;
+            attendance.lateReviewedAt = new Date();
+            attendance.lateRemarks = 'Excused - full day approved by attendance correction';
+        }
+        attendance.isEarlyLeave = false;
+        attendance.earlyLeaveMinutes = 0;
+    }
+
     attendance.isStatusOverridden = !!status;
     attendance.isCorrected = true;
     attendance.correctedBy = adminId;
@@ -1164,6 +1189,25 @@ const applyAttendanceCorrection = async (attendance, { checkInTime, checkOutTime
     attendance.approvedAt = new Date();
 
     await attendance.save();
+
+    // Original values are kept in the audit trail (the record itself only
+    // keeps previousStatus). GPS metadata on the punches is left untouched.
+    AuditLog.create({
+        user: adminId,
+        action: 'attendance.correct',
+        entityType: 'AttendanceRecord',
+        entityId: attendance._id,
+        company: attendance.company || undefined,
+        oldValues: before,
+        newValues: {
+            checkInTime: attendance.checkIn.time || null,
+            checkOutTime: attendance.checkOut.time || null,
+            status: attendance.status,
+            workingHours: attendance.workingHours,
+            reason: reason || undefined
+        }
+    }).catch((err) => logger.error('Audit log write failed:', err));
+
     return attendance;
 };
 
@@ -1174,7 +1218,7 @@ exports.checkIn = async (req, res) => {
 
     try {
         
-        const { location, latitude, longitude, device, photoUrl } = req.body;
+        const { location, device, photoUrl } = req.body;
         const userId = req.user.id;
         const today = moment().startOf('day').toDate();
         const now = new Date();
@@ -1183,7 +1227,7 @@ exports.checkIn = async (req, res) => {
         let attendance = await AttendanceRecord.findOne({ user: userId, date: today });
 
         if (attendance && attendance.checkIn.time) {
-            return errorResponse(res, 'Already checked in today', 400);
+            return sendGeoRejection(res, { httpStatus: 409, code: 'ALREADY_CHECKED_IN', message: 'Already checked in today' });
         }
 
         if (await isWeekend(today)) {
@@ -1223,6 +1267,10 @@ exports.checkIn = async (req, res) => {
         // after-grace window, i.e. grace is the only reason this isn't Late.
         const isGraceUsed = !isLate && currentTime.isAfter(officeStart);
 
+        // Geofence/GPS check (server-side; office is never taken from the client).
+        const geo = await evaluatePunch({ user: req.user, action: 'checkIn', body: req.body, now });
+        if (!geo.ok) return sendGeoRejection(res, geo);
+
         if (!attendance) {
             attendance = new AttendanceRecord({
                 user: userId,
@@ -1234,6 +1282,18 @@ exports.checkIn = async (req, res) => {
                 company: req.user.company || null,
                 subCompany: req.user.subCompany || null
             });
+        } else {
+            // A record already exists without a check-in (e.g. created by a
+            // correction). Claim it atomically so two simultaneous check-in
+            // requests can't both succeed.
+            attendance = await AttendanceRecord.findOneAndUpdate(
+                { _id: attendance._id, 'checkIn.time': null },
+                { $set: { 'checkIn.time': now } },
+                { new: true }
+            );
+            if (!attendance) {
+                return sendGeoRejection(res, { httpStatus: 409, code: 'ALREADY_CHECKED_IN', message: 'Already checked in today' });
+            }
         }
 
         attendance.checkIn = {
@@ -1242,8 +1302,7 @@ exports.checkIn = async (req, res) => {
             ipAddress: req.ip,
             device,
             photoUrl,
-            latitude,
-            longitude
+            ...geo.meta
         };
         // Today's day is in progress after check-in: never half day / absent
         // until checkout (or a later missed-checkout sweep) decides it.
@@ -1261,10 +1320,21 @@ exports.checkIn = async (req, res) => {
         attendance.graceAfterMinutes = rule.gracePeriodMinutes || 0;
         attendance.allowedEarlyCheckinMinutes = rule.allowedEarlyCheckinMinutes || 0;
 
-        await attendance.save();
+        try {
+            await attendance.save();
+        } catch (saveError) {
+            // Unique (user, date) index: a concurrent request created today's record first.
+            if (saveError.code === 11000) {
+                return sendGeoRejection(res, { httpStatus: 409, code: 'ALREADY_CHECKED_IN', message: 'Already checked in today' });
+            }
+            if (!attendance.isNew) {
+                await AttendanceRecord.updateOne({ _id: attendance._id }, { $unset: { 'checkIn.time': '' } }).catch(() => {});
+            }
+            throw saveError;
+        }
 
         logger.info(`User ${userId} checked in at ${now}`);
-        return successResponse(res, attendance, 'Checked in successfully');
+        return successResponse(res, attendance, geo.warning ? `Checked in. ${geo.warning}` : 'Checked in successfully');
     } catch (error) {
         logger.error('Check-in error:', error);
         return errorResponse(res, error.message, 500);
@@ -1276,19 +1346,33 @@ exports.checkIn = async (req, res) => {
 // @access  Private
 exports.checkOut = async (req, res) => {
     try {
-        const { location, latitude, longitude, device, photoUrl } = req.body;
+        const { location, device, photoUrl } = req.body;
         const userId = req.user.id;
         const today = moment().startOf('day').toDate();
         const now = new Date();
 
-        const attendance = await AttendanceRecord.findOne({ user: userId, date: today });
+        let attendance = await AttendanceRecord.findOne({ user: userId, date: today });
 
         if (!attendance || !attendance.checkIn.time) {
-            return errorResponse(res, 'Please check-in first', 400);
+            return sendGeoRejection(res, { httpStatus: 400, code: 'NOT_CHECKED_IN', message: 'Please check-in first' });
         }
 
         if (attendance.checkOut.time) {
-            return errorResponse(res, 'Already checked out today', 400);
+            return sendGeoRejection(res, { httpStatus: 409, code: 'ALREADY_CHECKED_OUT', message: 'Already checked out today' });
+        }
+
+        const geo = await evaluatePunch({ user: req.user, action: 'checkOut', body: req.body, now });
+        if (!geo.ok) return sendGeoRejection(res, geo);
+
+        // Claim the open session atomically: a second concurrent check-out
+        // finds checkOut.time already set and is rejected.
+        attendance = await AttendanceRecord.findOneAndUpdate(
+            { _id: attendance._id, 'checkIn.time': { $ne: null }, 'checkOut.time': null },
+            { $set: { 'checkOut.time': now } },
+            { new: true }
+        );
+        if (!attendance) {
+            return sendGeoRejection(res, { httpStatus: 409, code: 'ALREADY_CHECKED_OUT', message: 'Already checked out today' });
         }
 
         const rule = await getUserRule(userId);
@@ -1300,8 +1384,7 @@ exports.checkOut = async (req, res) => {
             ipAddress: req.ip,
             device,
             photoUrl,
-            latitude,
-            longitude
+            ...geo.meta
         };
         attendance.workingHours = outcome.workingHours;
         attendance.workingMinutes = outcome.workingMinutes;
@@ -1315,10 +1398,15 @@ exports.checkOut = async (req, res) => {
         attendance.isAbsent = outcome.isAbsent;
         attendance.officeEndTime = rule.checkOutTime;
 
-        await attendance.save();
+        try {
+            await attendance.save();
+        } catch (saveError) {
+            await AttendanceRecord.updateOne({ _id: attendance._id }, { $unset: { 'checkOut.time': '' } }).catch(() => {});
+            throw saveError;
+        }
 
         logger.info(`User ${userId} checked out at ${now}`);
-        return successResponse(res, attendance, 'Checked out successfully');
+        return successResponse(res, attendance, geo.warning ? `Checked out. ${geo.warning}` : 'Checked out successfully');
     } catch (error) {
         logger.error('Check-out error:', error);
         return errorResponse(res, error.message, 500);
@@ -1338,6 +1426,7 @@ exports.getAttendanceHistory = async (req, res) => {
         await markMissedCheckoutsAsHalfDay(userId);
 
         const query = { user: userId };
+
         if (startDate && endDate) {
             query.date = {
                 $gte: moment(startDate).startOf('day').toDate(),
@@ -1417,11 +1506,15 @@ exports.getAllAttendance = async (req, res) => {
 // @access  Private
 exports.getTodayAttendance = async (req, res) => {
     try {
+
         const userId = req.user.id;
         const today = moment().startOf('day').toDate();
-
+        
         const attendance = await AttendanceRecord.findOne({ user: userId, date: today });
         const rule = await getUserRule(userId);
+        // Tells the dashboard whether to request the device location before
+        // a punch, and which offices are accepted.
+        const geo = await getGeoContextForUser(req.user);
 
         if (!attendance) {
             return successResponse(res, {
@@ -1431,7 +1524,10 @@ exports.getTodayAttendance = async (req, res) => {
                 officeStartTime: rule.checkInTime,
                 officeEndTime: rule.checkOutTime,
                 graceBeforeMinutes: rule.graceBeforeMinutes || 0,
-                graceAfterMinutes: rule.gracePeriodMinutes || 0
+                graceAfterMinutes: rule.gracePeriodMinutes || 0,
+                checkInLocation: null,
+                checkOutLocation: null,
+                geo
             }, 'No attendance record for today');
         }
 
@@ -1461,8 +1557,13 @@ exports.getTodayAttendance = async (req, res) => {
             officeStartTime: attendance.officeStartTime || rule.checkInTime,
             officeEndTime: attendance.officeEndTime || rule.checkOutTime,
             graceBeforeMinutes: attendance.graceBeforeMinutes ?? (rule.graceBeforeMinutes || 0),
-            graceAfterMinutes: attendance.graceAfterMinutes ?? (rule.gracePeriodMinutes || 0)
+            graceAfterMinutes: attendance.graceAfterMinutes ?? (rule.gracePeriodMinutes || 0),
+            attendanceId: attendance._id,
+            checkInLocation: pickPunchLocation(attendance.checkIn),
+            checkOutLocation: pickPunchLocation(attendance.checkOut),
+            geo
         }, 'Today attendance status');
+
     } catch (error) {
         logger.error('Get today attendance error:', error);
         return errorResponse(res, error.message, 500);
@@ -1472,6 +1573,15 @@ exports.getTodayAttendance = async (req, res) => {
 // @desc    Request attendance correction (e.g. forgot to check-in/check-out on a given day)
 // @route   POST /api/attendance/correction
 // @access  Private
+// A check-out at or before the day's check-in (requested, or the one already
+// on the record) is almost always AM picked instead of PM - e.g. "04:55"
+// for 4:55 PM. Accepting it leaves a 0-hour day on the record.
+const checkOutBeforeCheckInError = (checkIn, checkOut) => {
+    if (!checkIn || !checkOut) return null;
+    if (moment(checkOut).isAfter(moment(checkIn))) return null;
+    return `Check-out (${moment.tz(checkOut, TZ).format('hh:mm A')}) must be after check-in (${moment.tz(checkIn, TZ).format('hh:mm A')}) - did you pick AM instead of PM?`;
+};
+
 exports.requestCorrection = async (req, res) => {
     try {
         const { attendanceRecordId, date, requestedCheckIn, requestedCheckOut, reason } = req.body;
@@ -1523,12 +1633,22 @@ exports.requestCorrection = async (req, res) => {
             return errorResponse(res, 'A pending correction request already exists for this date', 400);
         }
 
+        const checkInTime = requestedCheckIn ? moment.tz(requestedCheckIn, TZ).toDate() : null;
+        const checkOutTime = requestedCheckOut ? moment.tz(requestedCheckOut, TZ).toDate() : null;
+        const timeError = checkOutBeforeCheckInError(
+            checkInTime || (attendance && attendance.checkIn && attendance.checkIn.time),
+            checkOutTime
+        );
+        if (timeError) {
+            return errorResponse(res, timeError, 400);
+        }
+
         const correctionRequest = await AttendanceCorrectionRequest.create({
             user: userId,
             attendanceRecord: attendance ? attendance._id : undefined,
             date: recordDate,
-            requestedCheckIn: requestedCheckIn ? moment.tz(requestedCheckIn, TZ).toDate() : null,
-            requestedCheckOut: requestedCheckOut ? moment.tz(requestedCheckOut, TZ).toDate() : null,
+            requestedCheckIn: checkInTime,
+            requestedCheckOut: checkOutTime,
             reason
         });
 
@@ -1671,10 +1791,22 @@ exports.handleCorrectionRequest = async (req, res) => {
         // Lets the admin fix an obviously wrong requested time (e.g. an
         // employee picking AM instead of PM) right when approving, instead
         // of having to reject and make them resubmit.
+        let existingRecord = null;
         if (status === 'approved') {
             if (requestedCheckIn) correctionRequest.requestedCheckIn = moment.tz(requestedCheckIn, TZ).toDate();
             if (requestedCheckOut) correctionRequest.requestedCheckOut = moment.tz(requestedCheckOut, TZ).toDate();
             if (overrideStatus) correctionRequest.overrideStatus = overrideStatus;
+
+            existingRecord = correctionRequest.attendanceRecord
+                ? await AttendanceRecord.findById(correctionRequest.attendanceRecord)
+                : await findDayRecord(correctionRequest.user, correctionRequest.date);
+            const timeError = checkOutBeforeCheckInError(
+                correctionRequest.requestedCheckIn || (existingRecord && existingRecord.checkIn && existingRecord.checkIn.time),
+                correctionRequest.requestedCheckOut
+            );
+            if (timeError) {
+                return errorResponse(res, `${timeError} Edit the check-out time before approving.`, 400);
+            }
         }
 
         correctionRequest.status = status;
@@ -1688,9 +1820,7 @@ exports.handleCorrectionRequest = async (req, res) => {
 
         // If approved, update (or create) the underlying attendance record
         if (status === 'approved') {
-            let attendance = correctionRequest.attendanceRecord
-                ? await AttendanceRecord.findById(correctionRequest.attendanceRecord)
-                : await findDayRecord(correctionRequest.user, correctionRequest.date);
+            let attendance = existingRecord;
 
             if (!attendance) {
                 attendance = new AttendanceRecord({
@@ -2139,6 +2269,213 @@ exports.handleOvertimeRequest = async (req, res) => {
         return successResponse(res, attendance, `Overtime ${status}`);
     } catch (error) {
         logger.error('Handle overtime error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    List late arrivals for admin review (default: pending)
+// @route   GET /api/attendance/late
+// @access  Private/Admin
+exports.getLateRequests = async (req, res) => {
+    try {
+        const { status = 'pending', userId, month, year, page = 1, limit = 20 } = req.query;
+
+        const query = { isLate: true };
+        if (status === 'pending') {
+            // Legacy records predate lateStatus and still need a review.
+            query.lateStatus = { $nin: ['approved', 'rejected'] };
+        } else if (status !== 'all') {
+            query.lateStatus = status;
+        }
+
+        if (month && year) {
+            const monthStart = moment.tz([parseInt(year), parseInt(month) - 1, 1], TZ).startOf('day');
+            query.date = { $gte: monthStart.toDate(), $lte: moment(monthStart).endOf('month').toDate() };
+        }
+
+        const scope = scopeFilter(req);
+        if (Object.keys(scope).length) {
+            const scopedIds = await User.find(scope).distinct('_id');
+            query.user = userId
+                ? (scopedIds.some((id) => String(id) === String(userId)) ? userId : null)
+                : { $in: scopedIds };
+        } else if (userId) {
+            query.user = userId;
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const [total, records] = await Promise.all([
+            AttendanceRecord.countDocuments(query),
+            AttendanceRecord.find(query)
+                .select('user date checkIn.time checkOut.time lateMinutes isLate lateStatus lateReviewedBy lateReviewedAt lateRemarks')
+                .populate('user', 'firstName lastName employeeCode')
+                .sort({ date: -1 })
+                .skip(skip)
+                .limit(parseInt(limit))
+        ]);
+
+        return paginatedResponse(res, records, {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total,
+            totalPages: Math.ceil(total / parseInt(limit))
+        });
+    } catch (error) {
+        logger.error('Get late requests error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    Approve (excuse) or reject a late arrival. Approved lates are not
+//          counted by the payroll late-deduction policy; regenerate the
+//          month's slip afterwards for it to take effect.
+// @route   PUT /api/attendance/late/:id
+// @access  Private/Admin
+exports.handleLateRequest = async (req, res) => {
+    try {
+        const { status, remarks } = req.body;
+        if (!['approved', 'rejected'].includes(status)) {
+            return errorResponse(res, 'Status must be either approved or rejected', 400);
+        }
+
+        const attendance = await AttendanceRecord.findById(req.params.id);
+        if (!attendance) return errorResponse(res, 'Attendance record not found', 404);
+        if (!attendance.isLate) return errorResponse(res, 'This day is not marked late', 400);
+        if (attendance.isLocked) return errorResponse(res, 'Attendance for this period is locked', 400);
+
+        const employee = await User.findById(attendance.user).select('company subCompany');
+        if (!employee || !canAccessUser(req, employee)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+
+        attendance.lateStatus = status;
+        attendance.lateReviewedBy = req.user.id;
+        attendance.lateReviewedAt = new Date();
+        attendance.lateRemarks = remarks;
+        await attendance.save();
+
+        await Notification.create({
+            user: attendance.user,
+            title: `Late Arrival ${status === 'approved' ? 'Approved' : 'Rejected'}`,
+            message: status === 'approved'
+                ? `Your late arrival on ${moment.tz(attendance.date, TZ).format('DD MMM YYYY')} has been approved and will not be deducted.`
+                : `Your late arrival on ${moment.tz(attendance.date, TZ).format('DD MMM YYYY')} was not approved.${remarks ? ` Reason: ${remarks}` : ''}`,
+            type: status === 'approved' ? 'success' : 'error',
+            actionUrl: '/attendance/history'
+        });
+
+        const salary = await refreshSlipAfterAttendanceChange(attendance.user, attendance.date, req.user.id);
+
+        logger.info(`Late arrival ${status} for record ${attendance._id} by admin ${req.user.id}`);
+        return successResponse(res, { ...attendance.toObject(), salary }, `Late arrival ${status}`);
+    } catch (error) {
+        logger.error('Handle late request error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    List half days for admin review (default: pending)
+// @route   GET /api/attendance/half-day
+// @access  Private/Admin
+exports.getHalfDayRequests = async (req, res) => {
+    try {
+        const { status = 'pending', userId, month, year, page = 1, limit = 20 } = req.query;
+
+        // Past days with check-in but no check-out become half day first, so
+        // they show up here for review.
+        await markMissedCheckoutsAsHalfDay();
+
+        const query = { status: 'half_day' };
+        if (status === 'pending') {
+            // Legacy records predate halfDayStatus and still need a review.
+            query.halfDayStatus = { $nin: ['approved', 'rejected'] };
+        } else if (status !== 'all') {
+            query.halfDayStatus = status;
+        }
+
+        if (month && year) {
+            const monthStart = moment.tz([parseInt(year), parseInt(month) - 1, 1], TZ).startOf('day');
+            query.date = { $gte: monthStart.toDate(), $lte: moment(monthStart).endOf('month').toDate() };
+        }
+
+        const scope = scopeFilter(req);
+        if (Object.keys(scope).length) {
+            const scopedIds = await User.find(scope).distinct('_id');
+            query.user = userId
+                ? (scopedIds.some((id) => String(id) === String(userId)) ? userId : null)
+                : { $in: scopedIds };
+        } else if (userId) {
+            query.user = userId;
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const [total, records] = await Promise.all([
+            AttendanceRecord.countDocuments(query),
+            AttendanceRecord.find(query)
+                .select('user date status checkIn.time checkOut.time workingHours isLate lateMinutes isEarlyLeave earlyLeaveMinutes halfDayStatus halfDayReviewedBy halfDayReviewedAt halfDayRemarks')
+                .populate('user', 'firstName lastName employeeCode')
+                .sort({ date: -1 })
+                .skip(skip)
+                .limit(parseInt(limit))
+        ]);
+
+        return paginatedResponse(res, records, {
+            page: parseInt(page),
+            limit: parseInt(limit),
+            total,
+            totalPages: Math.ceil(total / parseInt(limit))
+        });
+    } catch (error) {
+        logger.error('Get half-day requests error:', error);
+        return errorResponse(res, error.message, 500);
+    }
+};
+
+// @desc    Approve a half day as a full day, or reject it (stays a half day).
+//          Approved half days are paid as present days by payroll; the
+//          month's slip is refreshed automatically while still editable.
+// @route   PUT /api/attendance/half-day/:id
+// @access  Private/Admin
+exports.handleHalfDayRequest = async (req, res) => {
+    try {
+        const { status, remarks } = req.body;
+        if (!['approved', 'rejected'].includes(status)) {
+            return errorResponse(res, 'Status must be either approved or rejected', 400);
+        }
+
+        const attendance = await AttendanceRecord.findById(req.params.id);
+        if (!attendance) return errorResponse(res, 'Attendance record not found', 404);
+        if (attendance.status !== 'half_day') return errorResponse(res, 'This day is not a half day', 400);
+        if (attendance.isLocked) return errorResponse(res, 'Attendance for this period is locked', 400);
+
+        const employee = await User.findById(attendance.user).select('company subCompany');
+        if (!employee || !canAccessUser(req, employee)) {
+            return errorResponse(res, 'Not authorized', 403);
+        }
+
+        attendance.halfDayStatus = status;
+        attendance.halfDayReviewedBy = req.user.id;
+        attendance.halfDayReviewedAt = new Date();
+        attendance.halfDayRemarks = remarks;
+        await attendance.save();
+
+        const dateLabel = moment.tz(attendance.date, TZ).format('DD MMM YYYY');
+        await Notification.create({
+            user: attendance.user,
+            title: `Half Day ${status === 'approved' ? 'Approved as Full Day' : 'Rejected'}`,
+            message: status === 'approved'
+                ? `Your half day on ${dateLabel} has been approved as a full day and will be paid in full.`
+                : `Your half day on ${dateLabel} was not approved as a full day.${remarks ? ` Reason: ${remarks}` : ''}`,
+            type: status === 'approved' ? 'success' : 'error',
+            actionUrl: '/attendance/history'
+        });
+
+        const salary = await refreshSlipAfterAttendanceChange(attendance.user, attendance.date, req.user.id);
+
+        logger.info(`Half day ${status} for record ${attendance._id} by admin ${req.user.id}`);
+        return successResponse(res, { ...attendance.toObject(), salary }, `Half day ${status}`);
+    } catch (error) {
+        logger.error('Handle half-day request error:', error);
         return errorResponse(res, error.message, 500);
     }
 };

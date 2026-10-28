@@ -79,6 +79,7 @@ const salarySlipSchema = new mongoose.Schema({
         presentDays: { type: Number, default: 0 },
         absentDays: { type: Number, default: 0 },
         halfDays: { type: Number, default: 0 },
+        approvedHalfDays: { type: Number, default: 0 }, // half days paid as full days (in presentDays)
         paidLeaveDays: { type: Number, default: 0 },
         unpaidLeaveDays: { type: Number, default: 0 },
         weeklyOffs: { type: Number, default: 0 },

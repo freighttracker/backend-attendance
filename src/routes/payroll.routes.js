@@ -11,6 +11,7 @@ router.post('/generate', payrollController.generatePayroll);
 router.post('/generate/employee', payrollController.generateSingleEmployeeSalary);
 router.post('/generate/department', payrollController.generateDepartmentSalary);
 router.post('/generate/company', payrollController.generateCompanySalary);
+router.post('/regenerate', payrollController.regeneratePayroll);
 
 router.get('/reports', payrollController.getPayrollReport);
 router.get('/reports/export', payrollController.exportPayrollReport);

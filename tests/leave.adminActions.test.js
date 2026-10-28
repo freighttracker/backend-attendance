@@ -28,6 +28,7 @@ function nextWeekday(monthsAhead) {
 }
 
 async function applyLeave(code, monthsAhead, days = 1) {
+    
     const leaveType = await LeaveType.findOne({ code });
     const start = nextWeekday(monthsAhead);
     const end = start.clone().add(days - 1, 'days');
@@ -113,6 +114,7 @@ describe('Admin cancel and edit actions', () => {
     });
 
     test('an employee cannot cancel their own approved leave (admin-only)', async () => {
+
         const { leave } = await applyLeave('SL', 13);
         await request(app)
             .put(`/api/leaves/${leave._id}/status`)

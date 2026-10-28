@@ -6,6 +6,7 @@ const { successResponse, errorResponse, paginatedResponse } = require('../utils/
 const { logger } = require('../utils/logger');
 
 const logAudit = (req, action, entityId, oldValues, newValues) => {
+
     AuditLog.create({
         user: req.user.id,
         action,
@@ -15,12 +16,13 @@ const logAudit = (req, action, entityId, oldValues, newValues) => {
         newValues,
         ipAddress: req.ip
     }).catch((err) => logger.error('Audit log write failed:', err));
-};
 
+};
 // @desc    List companies (with subcompany + user counts)
 // @route   GET /api/companies
 // @access  Private/SuperAdmin
 exports.listCompanies = async (req, res) => {
+
     try {
         const { page = 1, limit = 50, search, isActive } = req.query;
         const query = {};
@@ -70,17 +72,21 @@ exports.listCompanies = async (req, res) => {
 // @route   GET /api/companies/:id
 // @access  Private/SuperAdmin
 exports.getCompany = async (req, res) => {
+
     try {
+
         const company = await Company.findById(req.params.id);
         if (!company) return errorResponse(res, 'Company not found', 404);
 
         const subCompanies = await SubCompany.find({ company: company._id }).sort({ name: 1 });
         return successResponse(res, { ...company.toObject(), subCompanies }, 'Company retrieved');
+
     } catch (error) {
         logger.error('Get company error:', error);
         return errorResponse(res, error.message, 500);
     }
-};
+}; 
+          
 
 // @desc    Create a company, along with its first Company Admin login so the
 //          company is immediately usable instead of being an empty shell
@@ -88,15 +94,19 @@ exports.getCompany = async (req, res) => {
 // @route   POST /api/companies
 // @access  Private/SuperAdmin
 exports.createCompany = async (req, res) => {
+
     try {
+
         const {
             name, code, email, phone, address, city, state, country, taxNumber, website, contactPerson,
             adminFirstName, adminLastName, adminEmail, adminPassword, adminPhone
         } = req.body;
+        
         if (!name || !code) return errorResponse(res, 'Company name and code are required', 400);
         if (!adminFirstName || !adminLastName || !adminEmail || !adminPassword) {
             return errorResponse(res, 'Admin first name, last name, email and password are required to create the company\'s first login', 400);
         }
+        
         if (adminPassword.length < 6) {
             return errorResponse(res, 'Admin password must be at least 6 characters', 400);
         }
@@ -106,6 +116,7 @@ exports.createCompany = async (req, res) => {
         if (existingCompany) return errorResponse(res, 'A company with this code already exists', 409);
 
         const adminEmployeeCode = `${normalizedCode}-ADMIN`;
+
         const existingUser = await User.findOne({
             $or: [{ email: adminEmail.trim().toLowerCase() }, { employeeCode: adminEmployeeCode }]
         });
@@ -245,6 +256,7 @@ exports.archiveCompany = async (req, res) => {
 // @route   GET /api/companies/:id/users
 // @access  Private/SuperAdmin or that company's own Company Admin
 exports.getCompanyUsers = async (req, res) => {
+
     try {
         if (!req.scope.isSuperAdmin && String(req.scope.companyId || '') !== String(req.params.id)) {
             return errorResponse(res, 'Not authorized', 403);
@@ -272,6 +284,7 @@ exports.getCompanyUsers = async (req, res) => {
         logger.error('Get company users error:', error);
         return errorResponse(res, error.message, 500);
     }
+
 };
 
 // @desc    System-wide hierarchy stats for the Super Admin dashboard

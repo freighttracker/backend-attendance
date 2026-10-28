@@ -27,6 +27,7 @@ const markMissedCheckoutsAsHalfDay = async (userId = null) => {
         $set: {
             status: 'half_day',
             isHalfDay: true,
+            halfDayStatus: 'pending',
             isAbsent: false,
             isEarlyLeave: false,
             earlyLeaveMinutes: 0,

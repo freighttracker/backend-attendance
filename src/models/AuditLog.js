@@ -22,6 +22,13 @@ const auditLogSchema = new mongoose.Schema({
     newValues: {
         type: mongoose.Schema.Types.Mixed
     },
+    // Optional tenant of the changed entity, so company admins can be shown
+    // only their own company's audit trail. Unset on older entries.
+    company: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Company',
+        default: undefined
+    },
     ipAddress: String,
     userAgent: String,
     createdAt: {
@@ -34,5 +41,6 @@ auditLogSchema.index({ user: 1 });
 auditLogSchema.index({ action: 1 });
 auditLogSchema.index({ entityType: 1 });
 auditLogSchema.index({ createdAt: -1 });
+auditLogSchema.index({ company: 1, entityType: 1, createdAt: -1 });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

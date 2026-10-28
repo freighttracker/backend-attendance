@@ -60,19 +60,22 @@ const SLIP_FIELDS = [
 // and isn't locked/published/paid - transparently recomputes it in place.
 // All DB writes happen inside the caller-supplied session so a bulk run
 // never leaves half-applied bonus/loan bookkeeping behind on failure.
-const generateSlipForUser = async (userId, month, year, actorId, session) => {
+const generateSlipForUser = async (userId, month, year, actorId, session, options = {}) => {
     assertMonthHasElapsed(month, year);
 
     const existing = await SalarySlip.findOne({ user: userId, month, year }).session(session);
-    if (existing && (existing.isLocked || ['published', 'paid'].includes(existing.status))) {
-        throw new Error('Salary slip is locked or already published and cannot be regenerated');
+    if (existing && ['published', 'paid'].includes(existing.status)) {
+        throw new Error(`Salary slip is already ${existing.status} and cannot be regenerated`);
+    }
+    if (existing && existing.isLocked) {
+        throw new Error('Salary slip is locked - unlock its payroll run before regenerating');
     }
 
     if (existing) {
         await releaseSlipSideEffects(existing, session);
     }
 
-    const salaryData = await calculateSalary(userId, month, year);
+    const salaryData = await calculateSalary(userId, month, year, { ...options, existingSlipId: existing?._id || null });
 
     let slip;
     if (existing) {
@@ -101,12 +104,12 @@ const generateSlipForUser = async (userId, month, year, actorId, session) => {
     return slip;
 };
 
-const runGenerateForUser = async (userId, month, year, actorId) => {
+const runGenerateForUser = async (userId, month, year, actorId, options = {}) => {
     const session = await mongoose.startSession();
     try {
         let slip;
         await session.withTransaction(async () => {
-            slip = await generateSlipForUser(userId, month, year, actorId, session);
+            slip = await generateSlipForUser(userId, month, year, actorId, session, options);
         });
         const pdfUrl = await generateSalarySlipPDF(slip);
         slip.pdfUrl = pdfUrl;
@@ -160,14 +163,14 @@ exports.generateSingleEmployeeSalary = async (req, res) => {
 };
 
 // Shared implementation for department/company/bulk generation.
-const generateForUserList = async (req, res, users, { scope, department }) => {
+const generateForUserList = async (req, res, users, { scope, department, options = {} }) => {
     const { month, year } = req.body;
     const results = { success: [], failed: [] };
     const slips = [];
 
     for (const user of users) {
         try {
-            const slip = await runGenerateForUser(user._id, month, year, req.user.id);
+            const slip = await runGenerateForUser(user._id, month, year, req.user.id, options);
             slips.push(slip);
             results.success.push(user.employeeCode);
         } catch (err) {
@@ -244,6 +247,33 @@ exports.generatePayroll = async (req, res) => {
     if (userId) return exports.generateSingleEmployeeSalary(req, res);
     if (department) return exports.generateDepartmentSalary(req, res);
     return exports.generateCompanySalary(req, res);
+};
+
+// @desc    Regenerate existing/new slips using each employee's CURRENT salary
+//          structure, ignoring the structure's effective-from date. Used after
+//          an admin edits a salary and wants an already generated month to
+//          pick up the new amount. Published/paid/locked slips are refused.
+// @route   POST /api/payroll/regenerate
+// @body    { userIds: [id, ...], month, year }
+// @access  Private/Admin
+exports.regeneratePayroll = async (req, res) => {
+    try {
+        const { userIds, month, year } = req.body;
+        if (!Array.isArray(userIds) || userIds.length === 0 || !month || !year) {
+            return errorResponse(res, 'userIds, month and year are required', 400);
+        }
+
+        const users = await User.find({ _id: { $in: userIds }, role: { $ne: 'admin' } });
+        if (users.length === 0) return errorResponse(res, 'No employees found', 404);
+
+        return await generateForUserList(req, res, users, {
+            scope: users.length === 1 ? 'employee' : 'company',
+            options: { useLatestStructure: true }
+        });
+    } catch (error) {
+        logger.error('Regenerate payroll error:', error);
+        return errorResponse(res, error.message, 500);
+    }
 };
 
 // @desc    Get all payroll runs
@@ -734,4 +764,36 @@ exports.updatePayrollSettings = async (req, res) => {
     }
 };
 
+// Brings an existing slip in line after an attendance review (late or
+// half-day approval) changes what that month pays. Only a slip still in
+// 'generated' status is recomputed automatically - an approved/published/
+// paid or locked slip has been signed off, so the admin is told to
+// regenerate it themselves instead of it silently changing.
+const refreshSlipAfterAttendanceChange = async (userId, date, actorId) => {
+    const day = moment.tz(date, TZ);
+    const month = day.month() + 1;
+    const year = day.year();
+    const label = `${MONTH_SHORT[month - 1]} ${year}`;
+
+    const slip = await SalarySlip.findOne({ user: userId, month, year }).select('status isLocked');
+    if (!slip) {
+        return { updated: false, message: `No ${label} salary slip yet - it will include this when generated` };
+    }
+    if (slip.isLocked || slip.status !== 'generated') {
+        return {
+            updated: false,
+            message: `${label} salary slip is ${slip.isLocked ? 'locked' : slip.status} - regenerate it to apply this change`
+        };
+    }
+
+    try {
+        const updated = await runGenerateForUser(userId, month, year, actorId);
+        return { updated: true, netSalary: updated.netSalary, message: `${label} salary slip updated` };
+    } catch (error) {
+        logger.warn(`Could not refresh ${label} slip for ${userId}: ${error.message}`);
+        return { updated: false, message: `${label} salary slip could not be updated - regenerate it manually` };
+    }
+};
+
 module.exports.runGenerateForUser = runGenerateForUser;
+module.exports.refreshSlipAfterAttendanceChange = refreshSlipAfterAttendanceChange;

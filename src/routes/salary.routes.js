@@ -7,9 +7,9 @@ const { attachScope } = require('../middleware/scope.middleware');
 
 // Employee routes
 router.get('/my-slips', authenticate, salaryController.getMySalarySlips);
-
 // Alias for POST /api/payroll/generate - kept here since some clients call
 // /api/salary/generate instead of the canonical payroll route.
+
 router.post('/generate', authenticate, authorize('superadmin', 'admin'), payrollController.generatePayroll);
 
 // Admin routes
@@ -22,6 +22,7 @@ router.put('/:id/lock', authenticate, authorize('superadmin', 'admin'), salaryCo
 router.put('/:id/unlock', authenticate, authorize('superadmin', 'admin'), salaryController.unlockSalarySlip);
 router.put('/:id/pay', authenticate, authorize('superadmin', 'admin'), salaryController.markAsPaid);
 router.post('/:id/email', authenticate, authorize('superadmin', 'admin'), salaryController.emailSalarySlip);
+
 
 // Shared (self or admin) - keep generic /:id routes last so specific paths above always win
 router.get('/:id/download', authenticate, salaryController.downloadSalarySlip);

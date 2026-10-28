@@ -24,13 +24,13 @@ const attachScope = (req, res, next) => {
         // Full access by default. May optionally narrow via an explicit
         // query param (e.g. the admin hierarchy selector) - safe because a
         // superadmin is authorized to see any company/subcompany anyway.
+
         req.scope = {
             isSuperAdmin: true,
             companyId: req.query.companyId || null,
             subCompanyId: req.query.subCompanyId || null
         };
         
-
     } else if (role === 'company_admin' || role === 'admin') {
 
         // Pinned to their own company, covering all of its subcompanies.

@@ -46,8 +46,8 @@ const authorize = (...roles) => {
             return errorResponse(res, 'Access denied. Insufficient permissions.', 403);
         }
         next();
+        
     };
-    
 };
 
 module.exports = { authenticate, authorize };

@@ -77,9 +77,24 @@ const resolveComponent = (component, base) => {
 // Picks the salary structure version that was actually in force for the
 // given month/year, so past payroll can always be recalculated correctly
 // even after the employee has since been given a revision.
-const getEffectiveStructure = async (userId, month, year) => {
+// useLatest: an explicit admin "regenerate with latest salary" - ignore the
+// effective dates and apply the employee's current structure to this month.
+const getEffectiveStructure = async (userId, month, year, { useLatest = false } = {}) => {
     const structure = await SalaryStructure.findOne({ user: userId, isActive: true });
     if (!structure) return null;
+
+    if (useLatest) {
+        return {
+            structureId: structure._id,
+            monthlyGrossSalary: structure.monthlyGrossSalary,
+            annualCTC: structure.annualCTC,
+            earnings: structure.earnings,
+            deductions: structure.deductions,
+            overtime: structure.overtime,
+            effectiveFrom: structure.effectiveFrom,
+            effectiveTo: null
+        };
+    }
 
     const monthStart = moment.tz([year, month - 1, 1], TZ).startOf('day');
     const monthEnd = moment(monthStart).endOf('month');
@@ -228,6 +243,9 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         presentDays: 0,
         absentDays: 0,
         halfDays: 0,
+        // Half days an admin approved as full days - already included in
+        // presentDays, kept separately so the slip can show them.
+        approvedHalfDays: 0,
         paidLeaveDays: 0,
         unpaidLeaveDays: 0,
         weeklyOffs: 0,
@@ -305,8 +323,12 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
         }
 
         if (record) {
-            summary.lateCount += record.isLate ? 1 : 0;
-            summary.earlyLeaveCount += record.isEarlyLeave ? 1 : 0;
+            // Lates the admin approved (excused) don't count toward the late
+            // policy, and neither does a day an admin corrected to a full day
+            // (covers records corrected before corrections began excusing lates).
+            const correctedToFullDay = record.isCorrected && (record.status === 'present' || record.status === 'wfh');
+            summary.lateCount += record.isLate && record.lateStatus !== 'approved' && !correctedToFullDay ? 1 : 0;
+            summary.earlyLeaveCount += record.isEarlyLeave && !correctedToFullDay ? 1 : 0;
             summary.overtimeHours += record.overtimeHours || 0;
             if (record.overtimeStatus === 'approved') {
                 summary.approvedOvertimeHours += record.approvedOvertimeHours || 0;
@@ -317,6 +339,10 @@ const getMonthlyAttendanceSummary = async (userId, month, year) => {
 
             if (record.status === 'present' || record.status === 'wfh') {
                 summary.presentDays += 1;
+            } else if (record.status === 'half_day' && record.halfDayStatus === 'approved') {
+                // Admin approved this half day as a full day.
+                summary.presentDays += 1;
+                summary.approvedHalfDays += 1;
             } else if (record.status === 'half_day') {
                 summary.halfDays += 1;
             } else if (record.status === 'on_leave') {
@@ -403,11 +429,19 @@ const computeOvertimeAmount = (overtimeConfig, basicSalary, attendance) => {
 // Ad-hoc earnings: approved, not-yet-applied bonuses/reimbursements for the
 // month. "Applied" bookkeeping happens in applyAdHocEarnings() below.
 // ---------------------------------------------------------------------------
-const getPendingBonuses = (userId, month, year) =>
-    Bonus.find({ user: userId, month, year, status: 'approved', isApplied: false });
+// On regenerate, items already applied to the slip being recomputed count as
+// pending too. releaseSlipSideEffects() frees them inside the caller's
+// still-uncommitted transaction, which these session-less reads can't see -
+// without this a regenerated slip silently dropped its bonuses/reimbursements.
+const unappliedOrOnSlip = (existingSlipId) => (existingSlipId
+    ? { $or: [{ isApplied: false }, { salarySlip: existingSlipId }] }
+    : { isApplied: false });
 
-const getPendingReimbursements = (userId, month, year) =>
-    Reimbursement.find({ user: userId, month, year, status: 'approved', isApplied: false });
+const getPendingBonuses = (userId, month, year, existingSlipId = null) =>
+    Bonus.find({ user: userId, month, year, status: 'approved', ...unappliedOrOnSlip(existingSlipId) });
+
+const getPendingReimbursements = (userId, month, year, existingSlipId = null) =>
+    Reimbursement.find({ user: userId, month, year, status: 'approved', ...unappliedOrOnSlip(existingSlipId) });
 
 // Loans/advances: idempotent per month/year - if a deduction was already
 // recorded for this month (e.g. on a previous generate), reuse it verbatim
@@ -438,18 +472,18 @@ const getLoanAndAdvanceDeductions = async (userId, month, year) => {
 // Loan/AdvanceSalary documents; that happens in commitSlipSideEffects()
 // once the caller has decided to actually persist the slip.
 // ---------------------------------------------------------------------------
-const calculateSalary = async (userId, month, year) => {
+const calculateSalary = async (userId, month, year, { useLatestStructure = false, existingSlipId = null } = {}) => {
     const user = await User.findById(userId);
     if (!user) throw new Error('Employee not found');
 
-    const structure = await getEffectiveStructure(userId, month, year);
+    const structure = await getEffectiveStructure(userId, month, year, { useLatest: useLatestStructure });
     if (!structure) throw new Error(`No active salary structure found for ${user.employeeCode} covering ${month}/${year}`);
 
     const attendance = await getMonthlyAttendanceSummary(userId, month, year);
     const latePolicy = await getLatePolicy();
     const [pendingBonuses, pendingReimbursements, { loanLines, advanceLines }] = await Promise.all([
-        getPendingBonuses(userId, month, year),
-        getPendingReimbursements(userId, month, year),
+        getPendingBonuses(userId, month, year, existingSlipId),
+        getPendingReimbursements(userId, month, year, existingSlipId),
         getLoanAndAdvanceDeductions(userId, month, year)
     ]);
 

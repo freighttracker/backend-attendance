@@ -12,7 +12,9 @@
     "seed:superadmin": "node src/scripts/seeders/seedSuperAdmin.js",
     "migrate:leave-paid-status": "node src/scripts/migrations/backfillLeavePaidStatus.js",
     "migrate:company-hierarchy": "node src/scripts/migrations/migrateCompanyHierarchy.js",
-    "migrate:freightrack": "node src/scripts/migrations/setupFreightrackCompany.js"
+    "migrate:freightrack": "node src/scripts/migrations/setupFreightrackCompany.js",
+    "migrate:geo-attendance": "node src/scripts/migrations/setupGeoAttendance.js",
+    "geo:purge-locations": "node src/scripts/maintenance/purgeLocationData.js"
   },
   "dependencies": {
     "@faker-js/faker": "^8.4.1",

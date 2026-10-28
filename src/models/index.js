@@ -21,6 +21,10 @@ const SystemSetting = require('./SystemSetting');
 const AuditLog = require('./AuditLog');
 const Notification = require('./Notification');
 const AttendanceCorrectionRequest = require('./AttendanceCorrectionRequest');
+const OfficeLocation = require('./OfficeLocation');
+const EmployeeOfficeAssignment = require('./EmployeeOfficeAssignment');
+const AttendanceGeoPolicy = require('./AttendanceGeoPolicy');
+const OfficeAdminPermission = require('./OfficeAdminPermission');
 
 module.exports = {
     User,
@@ -45,5 +49,9 @@ module.exports = {
     SystemSetting,
     AuditLog,
     Notification,
-    AttendanceCorrectionRequest
+    AttendanceCorrectionRequest,
+    OfficeLocation,
+    EmployeeOfficeAssignment,
+    AttendanceGeoPolicy,
+    OfficeAdminPermission
 };

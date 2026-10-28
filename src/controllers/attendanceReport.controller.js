@@ -58,6 +58,7 @@ async function getTodayStatusMap(userIds) {
 // back to an estimate derived from the active salary structure and this
 // month's salary-day count when no slip has been generated yet. `salarySource`
 // tells the frontend which one it's looking at so it can label it honestly.
+
 async function resolveSalaryFigures(userId, month, year, attendance, salaryDays) {
     const { daysInMonth } = attendance;
 
@@ -156,6 +157,7 @@ function buildSummary(rows) {
 
 // Shared by the JSON report and its PDF export so both always show the same
 // employees and figures for a given set of filters.
+
 async function loadMonthlyRows(req) {
 
     const now = moment.tz(TZ);
@@ -190,6 +192,7 @@ async function loadMonthlyRows(req) {
 // @desc    Monthly attendance + salary summary for every employee, as a PDF
 // @route   GET /api/attendance/report/monthly/pdf
 // @access  Private/Admin
+
 exports.exportMonthlyReportPdf = async (req, res) => {
     try {
         const { month, year, rows } = await loadMonthlyRows(req);
@@ -209,6 +212,7 @@ exports.exportMonthlyReportPdf = async (req, res) => {
 // @desc    Monthly attendance report - summary cards + per-employee table
 // @route   GET /api/attendance/report/monthly
 // @access  Private/Admin
+
 exports.getMonthlyReport = async (req, res) => {
 
     try {
@@ -242,6 +246,7 @@ exports.getMonthlyReport = async (req, res) => {
 // @desc    A single employee's monthly attendance report (self or admin)
 // @route   GET /api/attendance/report/employee/:id
 // @access  Private (self) / Private/Admin (any)
+
 exports.getEmployeeReport = async (req, res) => {
 
     try {
@@ -310,6 +315,7 @@ exports.getEmployeeReport = async (req, res) => {
 //          for getEmployeeReport - no :id needed, always the caller's own)
 // @route   GET /api/attendance/monthly-summary
 // @access  Private
+
 exports.getMyMonthlySummary = (req, res) => {
     req.params.id = req.user.id;
     return exports.getEmployeeReport(req, res);
@@ -322,6 +328,7 @@ exports.getMyMonthlySummary = (req, res) => {
 //          getEmployeeReport above.
 // @route   GET /api/attendance/calendar/:id
 // @access  Private (self) / Private/Admin (any)
+
 exports.getAttendanceCalendar = async (req, res) => {
     try {
         const { id } = req.params;
@@ -497,6 +504,7 @@ exports.getAttendanceCalendar = async (req, res) => {
 // @desc    Today + month-to-date attendance dashboard
 // @route   GET /api/attendance/dashboard
 // @access  Private/Admin
+
 exports.getAttendanceDashboard = async (req, res) => {
     try {
 

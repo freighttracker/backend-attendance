@@ -1,5 +1,29 @@
 const mongoose = require('mongoose');
 
+// GPS metadata stored next to checkIn/checkOut (alongside the pre-existing
+// latitude/longitude). Everything here is computed server-side; only the
+// raw coordinates and accuracy come from the device. Records created before
+// geofencing simply have none of these set.
+const LOCATION_VALIDATION_STATUSES = ['valid', 'outside_geofence', 'low_accuracy', 'no_location', 'no_office', 'not_required'];
+const LOCATION_REVIEW_STATUSES = ['none', 'pending', 'approved', 'rejected'];
+
+const geoPunchFields = {
+    accuracy: Number,
+    office: { type: mongoose.Schema.Types.ObjectId, ref: 'OfficeLocation' },
+    officeName: String,
+    distanceMeters: Number,
+    validationStatus: { type: String, enum: LOCATION_VALIDATION_STATUSES },
+    // Policy mode that applied at the time (snapshot, like officeStartTime).
+    policyMode: { type: String, enum: ['off', 'flag', 'enforce'] },
+    reviewStatus: { type: String, enum: LOCATION_REVIEW_STATUSES },
+    exceptionReason: { type: String, trim: true },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reviewedAt: Date,
+    reviewRemarks: { type: String, trim: true },
+    // Set by the retention purge once coordinates were stripped.
+    locationPurgedAt: Date
+};
+
 const attendanceRecordSchema = new mongoose.Schema({
     user: {
         type: mongoose.Schema.Types.ObjectId,
@@ -30,7 +54,8 @@ const attendanceRecordSchema = new mongoose.Schema({
         device: String,
         photoUrl: String,
         latitude: Number,
-        longitude: Number
+        longitude: Number,
+        ...geoPunchFields
     },
     checkOut: {
         time: Date,
@@ -39,7 +64,8 @@ const attendanceRecordSchema = new mongoose.Schema({
         device: String,
         photoUrl: String,
         latitude: Number,
-        longitude: Number
+        longitude: Number,
+        ...geoPunchFields
     },
     workingHours: {
         type: Number,
@@ -99,6 +125,23 @@ const attendanceRecordSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    // An admin can excuse a late arrival. Approved lates stay visible as late
+    // but are NOT counted by payroll's late-deduction policy. Missing/
+    // 'pending' (incl. legacy records) still counts.
+    lateStatus: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending'
+    },
+    lateReviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    lateReviewedAt: Date,
+    lateRemarks: {
+        type: String,
+        trim: true
+    },
     isEarlyLeave: {
         type: Boolean,
         default: false
@@ -114,6 +157,23 @@ const attendanceRecordSchema = new mongoose.Schema({
     isHalfDay: {
         type: Boolean,
         default: false
+    },
+    // An admin can approve a half day as a full day. The day stays visible as
+    // half_day but payroll pays it as a present day (no half-day deduction).
+    // Missing/'pending' (incl. legacy records) still counts as a half day.
+    halfDayStatus: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending'
+    },
+    halfDayReviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    halfDayReviewedAt: Date,
+    halfDayRemarks: {
+        type: String,
+        trim: true
     },
     isAbsent: {
         type: Boolean,
@@ -193,6 +253,14 @@ attendanceRecordSchema.pre('save', function (next) {
         this.overtimeReviewedBy = undefined;
         this.overtimeReviewedAt = undefined;
     }
+    // Same for a half-day review: once the day's status changes (re-timed
+    // correction, override) the old approval no longer applies.
+    if (this.isModified('status') && !this.isModified('halfDayStatus') && !this.isNew) {
+        this.halfDayStatus = 'pending';
+        this.halfDayReviewedBy = undefined;
+        this.halfDayReviewedAt = undefined;
+        this.halfDayRemarks = undefined;
+    }
     next();
 });
 
@@ -203,5 +271,10 @@ attendanceRecordSchema.index({ status: 1 });
 attendanceRecordSchema.index({ isLocked: 1 });
 attendanceRecordSchema.index({ company: 1 });
 attendanceRecordSchema.index({ subCompany: 1 });
+attendanceRecordSchema.index({ 'checkIn.office': 1, date: -1 });
+attendanceRecordSchema.index({ 'checkIn.reviewStatus': 1 });
+attendanceRecordSchema.index({ 'checkOut.reviewStatus': 1 });
 
 module.exports = mongoose.model('AttendanceRecord', attendanceRecordSchema);
+module.exports.LOCATION_VALIDATION_STATUSES = LOCATION_VALIDATION_STATUSES;
+module.exports.LOCATION_REVIEW_STATUSES = LOCATION_REVIEW_STATUSES;

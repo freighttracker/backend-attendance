@@ -15,7 +15,7 @@ const anyAdmin = authorize('superadmin', 'admin', 'company_admin', 'subcompany_a
 router.get('/', authenticate, anyAdmin, attachScope, userController.getAllUsers);
 router.post('/', authenticate, anyAdmin, attachScope, userController.createUser);
 router.post('/bulk-upload', authenticate, authorize('superadmin', 'admin'), upload.single('file'), userController.bulkUpload);
-router.get('/departments/list', authenticate, userController.getDepartments);
+router.get('/departments/list', authenticate, attachScope, userController.getDepartments);
 
 // Profile routes
 router.get('/profile/me', authenticate, userController.getMyProfile);

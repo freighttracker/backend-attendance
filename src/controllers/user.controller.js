@@ -480,7 +480,8 @@ exports.bulkUpload = async (req, res) => {
 // @access  Private
 exports.getDepartments = async (req, res) => {
     try {
-        const departments = await User.distinct('department', { department: { $ne: null } });
+        // Scoped so one company never sees another company's department names.
+        const departments = await User.distinct('department', { ...scopeFilter(req), department: { $nin: [null, ''] } });
         return successResponse(res, departments, 'Departments retrieved');
     } catch (error) {
         logger.error('Get departments error:', error);

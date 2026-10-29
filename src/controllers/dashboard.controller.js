@@ -8,6 +8,7 @@ const WeekendConfig = require('../models/WeekendConfig');
 const SalarySlip = require('../models/SalarySlip');
 const { scopeFilter } = require('../middleware/scope.middleware');
 const { markMissedCheckoutsAsHalfDay } = require('../services/attendance.service');
+const { getGeoAccess, userIdsAssignedToOffices } = require('../services/geoAccess.service');
 const { successResponse, errorResponse } = require('../utils/responseHelper');
 const { logger } = require('../utils/logger');
 
@@ -18,6 +19,17 @@ const STAFF_ROLES = ['employee', 'manager'];
 const TREND_DAYS = 7;
 // How far ahead birthdays and work anniversaries are listed.
 const CELEBRATION_DAYS = 30;
+const PUNCH_LOCATION_FIELDS = ['officeName', 'distanceMeters', 'accuracy', 'validationStatus', 'reviewStatus'];
+
+// Just what the Today board shows for one punch; raw coordinates stay on the
+// Attendance locations screen.
+const punchLocation = (p) => (p?.validationStatus ? Object.fromEntries(PUNCH_LOCATION_FIELDS.map((k) => [k, p[k] ?? null])) : null);
+
+// One review state per row: anything pending wins, then rejected, then approved.
+const rowLocationReview = (r) => {
+    const states = [r?.checkIn?.reviewStatus, r?.checkOut?.reviewStatus];
+    return ['pending', 'rejected', 'approved'].find((s) => states.includes(s)) || null;
+};
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const fullName = (u) => `${u.firstName || ''} ${u.lastName || ''}`.trim();
@@ -89,9 +101,25 @@ exports.getAdminDashboard = async (req, res) => {
         const employeeIds = employees.map((e) => e._id);
         const inStaff = { $in: employeeIds };
 
-        const [records, leavesToday, holiday, weekendConfig, pendingLeaves, pendingCorrections, pendingOvertime, upcomingHolidays] = await Promise.all([
+        // Location details follow the same canViewLocations permission (and
+        // office restriction) as the Attendance locations screen.
+        const geoAccess = await getGeoAccess(req);
+        const canSeeLocations = Boolean(geoAccess.permissions?.canViewLocations);
+        const locationUserIds = canSeeLocations && geoAccess.officeIds
+            ? new Set((await userIdsAssignedToOffices(geoAccess.officeIds)).map(String))
+            : null;
+        const showLocation = (userId) => canSeeLocations && (!locationUserIds || locationUserIds.has(String(userId)));
+        const locationSelect = canSeeLocations
+            ? ['checkIn', 'checkOut'].flatMap((p) => PUNCH_LOCATION_FIELDS.map((k) => `${p}.${k}`)).join(' ')
+            : '';
+        const pendingLocationQuery = {
+            user: locationUserIds ? { $in: employeeIds.filter((id) => locationUserIds.has(String(id))) } : inStaff,
+            $or: [{ 'checkIn.reviewStatus': 'pending' }, { 'checkOut.reviewStatus': 'pending' }]
+        };
+
+        const [records, leavesToday, holiday, weekendConfig, pendingLeaves, pendingCorrections, pendingOvertime, upcomingHolidays, pendingLocationReviews] = await Promise.all([
             AttendanceRecord.find({ user: inStaff, date: { $gte: trendStart.toDate(), $lte: today.clone().endOf('day').toDate() } })
-                .select('user date status checkIn.time checkOut.time workingHours isLate lateMinutes isEarlyLeave earlyLeaveMinutes isCorrected updatedAt')
+                .select(`user date status checkIn.time checkOut.time workingHours isLate lateMinutes isEarlyLeave earlyLeaveMinutes isCorrected updatedAt ${locationSelect}`)
                 .lean(),
             LeaveRequest.find({
                 user: inStaff,
@@ -108,7 +136,8 @@ exports.getAdminDashboard = async (req, res) => {
                 .sort({ date: 1 })
                 .limit(3)
                 .select('name date type')
-                .lean()
+                .lean(),
+            canSeeLocations ? AttendanceRecord.countDocuments(pendingLocationQuery) : 0
         ]);
 
         // day -> (userId -> record)
@@ -131,6 +160,7 @@ exports.getAdminDashboard = async (req, res) => {
             const id = String(e._id);
             const r = todayRecords.get(id);
             const leave = leaveByUser.get(id);
+            const withLocation = showLocation(id);
             let status = 'not_checked_in';
             if (r) status = r.status;
             else if (leave) status = 'on_leave';
@@ -153,7 +183,11 @@ exports.getAdminDashboard = async (req, res) => {
                 lateMinutes: r?.lateMinutes || 0,
                 isEarlyLeave: Boolean(r?.isEarlyLeave),
                 earlyLeaveMinutes: r?.earlyLeaveMinutes || 0,
-                leaveType: leave?.leaveType?.name || null
+                leaveType: leave?.leaveType?.name || null,
+                recordId: withLocation && r ? r._id : null,
+                checkInLocation: withLocation ? punchLocation(r?.checkIn) : null,
+                checkOutLocation: withLocation ? punchLocation(r?.checkOut) : null,
+                locationReview: withLocation ? rowLocationReview(r) : null
             };
         });
 
@@ -170,7 +204,8 @@ exports.getAdminDashboard = async (req, res) => {
             offDay: byStatus('weekend', 'holiday'),
             late: count((r) => r.isLate),
             working: count((r) => r.isWorking),
-            checkedOut: count((r) => r.checkOut)
+            checkedOut: count((r) => r.checkOut),
+            inReview: count((r) => r.locationReview === 'pending')
         };
         // Rate is out of the people actually expected in today.
         const expected = summary.totalEmployees - summary.offDay - summary.onLeave;
@@ -221,8 +256,11 @@ exports.getAdminDashboard = async (req, res) => {
             pending: {
                 leaves: pendingLeaves,
                 corrections: pendingCorrections,
-                overtime: pendingOvertime
+                overtime: pendingOvertime,
+                locationReviews: pendingLocationReviews
             },
+            canViewLocations: canSeeLocations,
+            canReviewExceptions: canSeeLocations && Boolean(geoAccess.permissions?.canReviewExceptions),
             employees: rows,
             trend,
             departments,

@@ -29,7 +29,7 @@ function normalizeSalaryPayload(body) {
 // @access  Private/Admin
 exports.getAllUsers = async (req, res) => {
     try {
-        const { page = 1, limit = 10, search, department, role, isActive, activeFrom } = req.query;
+        const { page = 1, limit = 10, search, department, role, isActive, activeFrom, exitType } = req.query;
         // req.scope is set by attachScope from the caller's OWN user record -
         // a company_admin/subcompany_admin can never see past it regardless
         // of what's in the query string.
@@ -56,13 +56,22 @@ exports.getAllUsers = async (req, res) => {
         } else if (isActive !== undefined) {
             query.isActive = isActive === 'true';
         }
+        if (exitType) {
+            if (!EXIT_TYPES.includes(exitType)) {
+                return errorResponse(res, `exitType must be one of: ${EXIT_TYPES.join(', ')}`, 400);
+            }
+            query.isActive = false;
+            query.exitType = exitType;
+        }
 
         const skip = (parseInt(page) - 1) * parseInt(limit);
         const total = await User.countDocuments(query);
 
+        // Exit records read newest-exit first; everything else newest-hire first.
+        const sort = query.isActive === false ? { leftAt: -1, createdAt: -1 } : { createdAt: -1 };
         const users = await User.find(query)
             .select('-password -refreshToken')
-            .sort({ createdAt: -1 })
+            .sort(sort)
             .skip(skip)
             .limit(parseInt(limit));
 

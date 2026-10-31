@@ -107,10 +107,10 @@ exports.rejectBonus = async (req, res) => {
         return errorResponse(res, error.message, 500);
     }
 };
-
 // @desc    Delete a bonus (only if not yet applied to a salary slip)
 // @route   DELETE /api/payroll/bonuses/:id
 // @access  Private/Admin
+
 exports.deleteBonus = async (req, res) => {
 
     try {

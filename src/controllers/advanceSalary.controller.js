@@ -83,6 +83,7 @@ exports.getMyAdvances = async (req, res) => {
 // @route   PUT /api/payroll/advances/:id/approve
 // @access  Private/Admin
 exports.approveAdvance = async (req, res) => {
+
     try {
         const advance = await AdvanceSalary.findById(req.params.id);
         if (!advance) return errorResponse(res, 'Advance not found', 404);
@@ -98,12 +99,14 @@ exports.approveAdvance = async (req, res) => {
         logger.error('Approve advance error:', error);
         return errorResponse(res, error.message, 500);
     }
+    
 };
 
 // @desc    Reject a pending advance request
 // @route   PUT /api/payroll/advances/:id/reject
 // @access  Private/Admin
 exports.rejectAdvance = async (req, res) => {
+
     try {
         const advance = await AdvanceSalary.findByIdAndUpdate(
             req.params.id,

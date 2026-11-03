@@ -112,12 +112,7 @@ exports.getAdminDashboard = async (req, res) => {
         const locationSelect = canSeeLocations
             ? ['checkIn', 'checkOut'].flatMap((p) => PUNCH_LOCATION_FIELDS.map((k) => `${p}.${k}`)).join(' ')
             : '';
-        const pendingLocationQuery = {
-            user: locationUserIds ? { $in: employeeIds.filter((id) => locationUserIds.has(String(id))) } : inStaff,
-            $or: [{ 'checkIn.reviewStatus': 'pending' }, { 'checkOut.reviewStatus': 'pending' }]
-        };
-
-        const [records, leavesToday, holiday, weekendConfig, pendingLeaves, pendingCorrections, pendingOvertime, upcomingHolidays, pendingLocationReviews] = await Promise.all([
+        const [records, leavesToday, holiday, weekendConfig, pendingLeaves, pendingCorrections, pendingOvertime, upcomingHolidays] = await Promise.all([
             AttendanceRecord.find({ user: inStaff, date: { $gte: trendStart.toDate(), $lte: today.clone().endOf('day').toDate() } })
                 .select(`user date status checkIn.time checkOut.time workingHours isLate lateMinutes isEarlyLeave earlyLeaveMinutes isCorrected updatedAt ${locationSelect}`)
                 .lean(),
@@ -136,8 +131,7 @@ exports.getAdminDashboard = async (req, res) => {
                 .sort({ date: 1 })
                 .limit(3)
                 .select('name date type')
-                .lean(),
-            canSeeLocations ? AttendanceRecord.countDocuments(pendingLocationQuery) : 0
+                .lean()
         ]);
 
         // day -> (userId -> record)
@@ -257,7 +251,9 @@ exports.getAdminDashboard = async (req, res) => {
                 leaves: pendingLeaves,
                 corrections: pendingCorrections,
                 overtime: pendingOvertime,
-                locationReviews: pendingLocationReviews
+                // Today's punches awaiting review - the same set the location
+                // monitoring card lists, so the badge and the card agree.
+                locationReviews: canSeeLocations ? summary.inReview : 0
             },
             canViewLocations: canSeeLocations,
             canReviewExceptions: canSeeLocations && Boolean(geoAccess.permissions?.canReviewExceptions),

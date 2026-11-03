@@ -69,6 +69,7 @@ exports.getAdvances = async (req, res) => {
 // @desc    Get my salary advances
 // @route   GET /api/payroll/advances/my
 // @access  Private
+
 exports.getMyAdvances = async (req, res) => {
     try {
         const advances = await AdvanceSalary.find({ user: req.user.id }).sort({ createdAt: -1 });
@@ -82,6 +83,7 @@ exports.getMyAdvances = async (req, res) => {
 // @desc    Approve a pending advance request
 // @route   PUT /api/payroll/advances/:id/approve
 // @access  Private/Admin
+
 exports.approveAdvance = async (req, res) => {
 
     try {
@@ -105,6 +107,7 @@ exports.approveAdvance = async (req, res) => {
 // @desc    Reject a pending advance request
 // @route   PUT /api/payroll/advances/:id/reject
 // @access  Private/Admin
+
 exports.rejectAdvance = async (req, res) => {
 
     try {
@@ -124,6 +127,7 @@ exports.rejectAdvance = async (req, res) => {
 // @desc    Close an active advance
 // @route   PUT /api/payroll/advances/:id/close
 // @access  Private/Admin
+
 exports.closeAdvance = async (req, res) => {
     try {
         const advance = await AdvanceSalary.findByIdAndUpdate(
